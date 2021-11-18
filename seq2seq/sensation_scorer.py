@@ -6,6 +6,9 @@ import numpy as np
 
 def get_embedding(word2vec_file, lang):
     word2vector = {}
+    if word2vec_file == '/home/share/chinese_emb/sgns.weibo.char':
+        word2vec_file = 'sgns.weibo.char'
+        
     with open(word2vec_file) as f:
         lines = f.readlines()
         assert len(lines[0].strip().split())  == 2
