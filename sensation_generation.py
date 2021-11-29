@@ -11,6 +11,102 @@ import copy
 import jieba
 from utils.function import *
 
+from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
+from transformers import BertTokenizer
+
+class PersuasivePairsDataset(Dataset):
+    """Persuasive pairs dataset."""
+
+    def __init__(
+        self,
+        persuasive_pairs_df,
+        columns: dict = {'label': 'label',
+                         'sentence_a': 'sentence_a', 'sentence_b': 'sentence_b'},
+    ):
+        """
+        Args:
+            persuasive_pairs_df (pd.DataFrame): dataframe of persuasive pairs
+            columns (dict): columns with default column names paired with custom ones
+        """
+        self.persuasive_pairs_df = persuasive_pairs_df
+        self.columns = columns
+
+    def __len__(self):
+        return len(self.persuasive_pairs_df)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = int(idx.data)
+
+        data_idx = self.persuasive_pairs_df[idx]
+        label = data_idx[self.columns['label']]
+        sentence_a = data_idx[self.columns['sentence_a']]
+        sentence_b = data_idx[self.columns['sentence_b']]
+
+        return {
+            'texts': [sentence_a, sentence_b],
+            'label': int(label)
+        }
+
+def get_data_loaders(args, tokenizer,
+                     train_dir='../persuasive_classifier/16k_persuasiveness/data/UKPConvArg1Strict-XML/',
+                     test_dir='../persuasive_classifier/16k_persuasiveness/data/UKPConvArg1Strict-XML/'):
+    '''
+    Gets the train and test dataloaders from the data loader function.
+
+    Args:
+        args: command-line arguments
+        tokenizer: tokenizer for tokenizing samples
+        dataset_type: type of dataset corresponding to model type
+        data_loader_fn: function to load data from directories
+        train_dir: directory to load training data from
+        test_dir: directory to load testing data from
+    Returns:
+        a train and test dataloader
+    '''
+
+    train_dataset, test_dataset = None, None
+    train_dataloader, test_dataloader = None, None
+
+    if train_dir == test_dir:
+        # data is in the same file/directory
+        persuasive_pairs = data_loader_fn(
+            train_dir,
+            exclude_equal_arguments=args.exclude_equal_arguments
+        )
+
+        # random train/test split
+        total_length = len(persuasive_pairs)
+        random.shuffle(persuasive_pairs)
+        split = int(args.train_test_split * total_length)
+        train_dataset = persuasive_pairs[:split]
+        test_dataset = persuasive_pairs[split:]
+    else:
+        train_dataset = data_loader_fn(
+            train_dir,
+            exclude_equal_arguments=args.exclude_equal_arguments
+        )
+        test_dataset = data_loader_fn(
+            test_dir,
+            exclude_equal_arguments=args.exclude_equal_arguments
+        )
+
+    if dataset_type == PersuasivePairsDataset:
+        persuasive_pairs_train = dataset_type(train_dataset, tokenizer)
+        persuasive_pairs_test = dataset_type(test_dataset, tokenizer)
+    else:
+        persuasive_pairs_train = dataset_type(train_dataset)
+        persuasive_pairs_test = dataset_type(test_dataset)
+
+    if args.do_train:
+        train_dataloader = DataLoader(persuasive_pairs_train, batch_size=args.train_batch_size,
+                                      shuffle=True, num_workers=0)
+    if args.do_eval:
+        test_dataloader = DataLoader(persuasive_pairs_test, batch_size=args.test_batch_size,
+                                     shuffle=False, num_workers=0)
+
+    return train_dataloader, test_dataloader
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -18,12 +114,24 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], output_vocab_size=args['output_vocab_size'], thd=args["thd"])
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        lang = Lang(list(tokenizer.encoder.keys()))
+
+        # setting args for our data loader function
+        args.exclude_equal_arguments = True
+        args.train_test_split = 0.8
+        args.do_train = True
+        args.do_eval = True
+        train, dev = get_data_loaders(args, tokenizer)
+        test = dev
+
+        # train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], output_vocab_size=args['output_vocab_size'], thd=args["thd"])
         args["vocab_size"] = lang.n_words
-        args["max_q"] = max_q
-        args["max_r"] = max_r
+        args["max_q"] = 512
+        args["max_r"] = 0
 
         self.args = args
+        print(args)
         self.train = train
         self.dev = dev
         self.test = test
@@ -142,7 +250,6 @@ class Trainer(object):
             self.expected_rewards_loss += expected_rewards_loss.data[0]
 
     def training(self):
-
         # Configure models
         step = 0
         best_metric = 0.0

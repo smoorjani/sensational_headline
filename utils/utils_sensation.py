@@ -19,11 +19,18 @@ class Lang:
         self.n_words = len(self.idx2word)
         self.word2count = dict(zip(self.idx2word.values(), [0] * self.n_words))
         if vocab_file is not None:
-            with open(vocab_file,"r") as f:
-                for w in f.readlines():
-                    self.idx2word[self.n_words] = w.split()[0].strip()
+            if type(vocab_file) == str:
+                with open(vocab_file,"r") as f:
+                    for w in f.readlines():
+                        self.idx2word[self.n_words] = w.split()[0].strip()
+                        self.n_words += 1
+                        self.word2count[w.split()[0].strip()] = 0
+            elif type(vocab_file) == list:
+                # instead of getting from file, get directly from tokenizer
+                for w in vocab_file:
+                    self.idx2word[self.n_words] = w
                     self.n_words += 1
-                    self.word2count[w.split()[0].strip()] = 0
+                    self.word2count[w] = 0
         self.word2idx = dict(zip(self.idx2word.values(), self.idx2word.keys()))
 
     def extend(self, vocab_file):
@@ -193,53 +200,36 @@ def read_langs(file_name):
     return data, max_q, 0
 
 def prepare_data_seq(batch_size, output_vocab_size, debug=False, shuffle=True, pointer_gen=False):
-    f_name = "dataset/sensation/db_pointer.pkl"
-    import pickle
-    if debug and os.path.exists(f_name):
-        with open(f_name, "rb") as f:
-            train = pickle.load(f)
-            dev = pickle.load(f)
-            test = pickle.load(f)
-            lang = pickle.load(f)
-            max_q = pickle.load(f)
-            max_r = pickle.load(f)
+
+    file_train = "dataset/sensation/train.txt"
+    file_dev = "dataset/sensation/dev.txt"
+    file_test = "dataset/sensation/test.txt"
+    vocab_file = "dataset/lcsts/vocab.dict.{}".format(output_vocab_size)
+    
+    d_train, max_q_train, max_r_train = read_langs(file_train)
+    d_dev, max_q_dev, max_r_dev = read_langs(file_dev)
+    d_test, max_q_test, max_r_test = read_langs(file_test)
+    
+    lang = Lang(vocab_file)
+    logging.info("finish loading lang")
+    
+    max_q = max(max_q_train, max_q_test, max_q_dev)
+    max_r = max(max_r_train, max_r_test, max_r_dev)
+    max_q = min(max_q, 400)
+    logging.info("max_q: {}, max_r: {}".format(max_q, max_r))
+    
+    logging.info("start get seq for train")
+    if debug:
+        max_len = 20000
     else:
-        file_train = "dataset/sensation/train.txt"
-        file_dev = "dataset/sensation/dev.txt"
-        file_test = "dataset/sensation/test.txt"
-        vocab_file = "dataset/lcsts/vocab.dict.{}".format(output_vocab_size)
-        
-        d_train, max_q_train, max_r_train = read_langs(file_train)
-        d_dev, max_q_dev, max_r_dev = read_langs(file_dev)
-        d_test, max_q_test, max_r_test = read_langs(file_test)
-        
-        lang = Lang(vocab_file)
-        logging.info("finish loading lang")
-        
-        max_q = max(max_q_train, max_q_test, max_q_dev)
-        max_r = max(max_r_train, max_r_test, max_r_dev)
-        max_q = min(max_q, 400)
-        logging.info("max_q: {}, max_r: {}".format(max_q, max_r))
-        
-        logging.info("start get seq for train")
-        if debug:
-        	max_len = 20000
-        else:
-        	max_len = None
-        
-        train = get_seq(d_train, lang, batch_size, True, max_q, max_len, pointer_gen=pointer_gen, shuffle=shuffle)
-        logging.info("start get seq for dev")
-        dev = get_seq(d_dev, lang, batch_size, False, max_q, max_len, pointer_gen=pointer_gen, shuffle=False)
-        logging.info("start get seq for test")
-        test = get_seq(d_test, lang, batch_size, False, max_q, max_len, pointer_gen=pointer_gen, shuffle=False)
-    if debug and not os.path.exists(f_name):
-        with open(f_name, "wb") as f:
-            pickle.dump(train, f)
-            pickle.dump(dev, f)
-            pickle.dump(test, f)
-            pickle.dump(lang, f)
-            pickle.dump(max_q, f)
-            pickle.dump(max_r, f)
+        max_len = None
+    
+    train = get_seq(d_train, lang, batch_size, True, max_q, max_len, pointer_gen=pointer_gen, shuffle=shuffle)
+    logging.info("start get seq for dev")
+    dev = get_seq(d_dev, lang, batch_size, False, max_q, max_len, pointer_gen=pointer_gen, shuffle=False)
+    logging.info("start get seq for test")
+    test = get_seq(d_test, lang, batch_size, False, max_q, max_len, pointer_gen=pointer_gen, shuffle=False)
+
     return train, dev, test, lang, max_q, max_r
 
 def input_txt_to_batch(input_txt, lang):

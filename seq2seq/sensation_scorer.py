@@ -7,7 +7,8 @@ import numpy as np
 def get_embedding(word2vec_file, lang):
     word2vector = {}
     if word2vec_file == '/home/share/chinese_emb/sgns.weibo.char':
-        word2vec_file = 'sgns.weibo.char'
+        # word2vec_file = 'sgns.weibo.char'
+        word2vec_file = 'wiki-news-300d-1M.vec'
         
     with open(word2vec_file) as f:
         lines = f.readlines()
