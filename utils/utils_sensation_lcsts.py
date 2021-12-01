@@ -226,7 +226,7 @@ def read_langs(file_name, thd=0.0):
 
     return data, max_q, max_r
 
-def prepare_data_seq(batch_size, output_vocab_size, debug=False , shuffle=True, pointer_gen=False, thd=None):
+def prepare_data_seq(batch_size, vocab, debug=False , shuffle=True, pointer_gen=False, thd=None):
     f_name = "dataset/sensation_lcsts/db_pointer.pkl"
     import pickle
     if debug and os.path.exists(f_name):
@@ -238,16 +238,15 @@ def prepare_data_seq(batch_size, output_vocab_size, debug=False , shuffle=True, 
             max_q = pickle.load(f)
             max_r = pickle.load(f)
     else:
-        file_train = "dataset/sensation_lcsts/same_train.txt"
-        file_dev = "dataset/sensation_lcsts/same_dev.txt"
-        file_test = "dataset/sensation_lcsts/same_test.txt"
-        vocab_file = "dataset/lcsts/vocab.dict.{}".format(output_vocab_size)
+        file_train = "persuasive_pairs_data_train.txt"
+        file_dev = "persuasive_pairs_data_test.txt"
+        file_test = "persuasive_pairs_data_test.txt"
         logging.info(thd)        
         d_train, max_q_train, max_r_train = read_langs(file_train, thd)
         d_dev, max_q_dev, max_r_dev = read_langs(file_dev)
         d_test, max_q_test, max_r_test = read_langs(file_test)
         
-        lang = Lang(vocab_file)
+        lang = Lang("vocab.txt")
         logging.info("finish loading lang")
         
         max_q = max(max_q_train, max_q_test, max_q_dev) + 1

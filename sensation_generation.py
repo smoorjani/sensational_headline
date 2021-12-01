@@ -11,7 +11,7 @@ import copy
 import jieba
 from utils.function import *
 
-from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
+# from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
 from transformers import BertTokenizer
 
 class PersuasivePairsDataset(Dataset):
@@ -114,21 +114,24 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        lang = Lang(list(tokenizer.encoder.keys()))
-
+        # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        # lang = Lang(list(tokenizer.encoder.keys()))
+        with open("vocab.txt", "r") as f:
+            vocab = f.readlines()
+        vocab = list(map(lambda x: x.strip().replace('#',''), vocab))
+        # print(vocab)
         # setting args for our data loader function
-        args.exclude_equal_arguments = True
-        args.train_test_split = 0.8
-        args.do_train = True
-        args.do_eval = True
-        train, dev = get_data_loaders(args, tokenizer)
-        test = dev
+        # args.exclude_equal_arguments = True
+        # args.train_test_split = 0.8
+        # args.do_train = True
+        # args.do_eval = True
+        # train, dev = get_data_loaders(args, tokenizer)
+        # test = dev
 
-        # train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], output_vocab_size=args['output_vocab_size'], thd=args["thd"])
+        train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], vocab=vocab, thd=args["thd"])
         args["vocab_size"] = lang.n_words
-        args["max_q"] = 512
-        args["max_r"] = 0
+        args["max_q"] = max_q
+        args["max_r"] = max_r
 
         self.args = args
         print(args)
