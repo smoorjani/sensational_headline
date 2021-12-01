@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from utils.sensation_config import *
 import numpy as np
+from transformers import BertModel
 
 def get_embedding(word2vec_file, lang):
     word2vector = {}
@@ -67,7 +68,7 @@ class SensationCNN(nn.Module):
         feat_maps_q = [F.relu(conv(q_embedded))  for conv in self.convs_q]
         feat_map2_q = torch.cat([F.max_pool1d(feat_map, feat_map.size(2)).squeeze(-1) for feat_map in feat_maps_q], 1)
 
-        prob = F.sigmoid(self.out(feat_map2_q)).squeeze()
+        prob = torch.sigmoid(self.out(feat_map2_q)).squeeze()
         return prob
 
     def predict_raw_text(self, raw_txt):
@@ -103,3 +104,23 @@ class SensationCNN(nn.Module):
         acc = ((prob > 0.5).long() == label.long()).float().sum() * 1.0 / label.size(0) 
 
         return loss.data[0], acc
+
+class PersuasivenessClassifier(nn.Module):
+    def __init__(self, lang, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
+        super(PersuasivenessClassifier, self).__init__()
+        self.lang = lang
+        self.bert = BertModel.from_pretrained(model_name)
+        self.dropout = nn.Dropout(p=dropout)
+        self.linear = nn.Linear(hidden_dim, n_classes)
+        self.softmax = nn.Softmax(dim=1)
+
+    # def forward(self, ids, mask, token_type_ids):
+    def forward(self, input_batch):
+        mask = torch.subtract(torch.ones_like(input_batch), input_batch == self.lang.word2idx['PAD'])
+        token_type_ids = torch.zeros_like(input_batch)
+        outputs = self.bert(input_batch, attention_mask=mask,
+                            token_type_ids=token_type_ids)
+        output = self.dropout(outputs.pooler_output)
+        output = self.linear(output)
+        output = self.softmax(output)
+        return output

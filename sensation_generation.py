@@ -5,11 +5,13 @@ from utils.config import *
 from utils.utils_sensation_lcsts import *
 from torch.nn.utils import clip_grad_norm
 from seq2seq.sensation_get_to_the_point import *
-from seq2seq.sensation_scorer import SensationCNN
+from seq2seq.sensation_scorer import SensationCNN, PersuasivenessClassifier
 import logging
 import copy
 import jieba
 from utils.function import *
+import sys
+
 
 # from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
 from transformers import BertTokenizer
@@ -156,10 +158,13 @@ class Trainer(object):
 
         assert args["sensation_scorer_path"] is not None
         opts = torch.load(args["sensation_scorer_path"]+"/args.th")
-        self.sensation_model = SensationCNN(opts, self.lang)
-        logging.info("load checkpoint from {}".format(args["sensation_scorer_path"]))
-        checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
-        self.sensation_model.load_state_dict(checkpoint['model'])
+        # self.sensation_model = SensationCNN(opts, self.lang)
+        # logging.info("load checkpoint from {}".format(args["sensation_scorer_path"]))
+        # checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
+        # self.sensation_model.load_state_dict(checkpoint['model'])
+        self.sensation_model = PersuasivenessClassifier(self.lang)
+        # sys.path.insert(0, '../persuasive_classifier/models')
+        model = self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
         if USE_CUDA:
             self.sensation_model.cuda()
 
@@ -271,7 +276,7 @@ class Trainer(object):
             self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             step, best_metric = self.load_rl_model()
         elif self.args["path"] is not None:
-            step, best_metric = self.load_base_model() 
+            # step, best_metric = self.load_base_model() 
             if self.args["use_rl"]:
                 best_metric = 0.0
                 self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)

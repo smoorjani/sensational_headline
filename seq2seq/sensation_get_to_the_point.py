@@ -51,6 +51,7 @@ class BiLSTMEncoder(nn.Module):
         self.hidden_size = args["hidden_size"]
         self.lstm = nn.LSTM(args["emb_size"], args["hidden_size"], num_layers=args["encoder_layers"], batch_first=True, bidirectional=True)
         init_lstm_wt(self.lstm)
+        self.lstm.flatten_parameters()
         self.embedding = embedding
 
         if self.args["use_oov_emb"]:
@@ -74,6 +75,7 @@ class BiLSTMEncoder(nn.Module):
         # output, hidden = self.lstm(packed, (h0_encoder, c0_encoder))
         embedded = self.embedding(enc_input)
         packed = pack_padded_sequence(embedded, seq_lens, batch_first=True)
+        self.lstm.flatten_parameters()
         output, hidden = self.lstm(packed)
         h, _ = pad_packed_sequence(output, batch_first=True)  # h dim = B x t_k x n
        
@@ -143,7 +145,7 @@ class Attention(nn.Module):
             coverage_feature = self.W_c(coverage_input)  # B * t_k x 2*hidden_dim
             att_features = att_features + coverage_feature
 
-        e = F.tanh(att_features) # B * t_k x 2*hidden_dim
+        e = torch.tanh(att_features) # B * t_k x 2*hidden_dim
         scores = self.v(e)  # B * t_k x 1
         scores = scores.view(-1, t_k)  # B x t_k
 
@@ -175,6 +177,7 @@ class PointerAttnDecoder(nn.Module):
 
         self.lstm = nn.LSTM(self.args["emb_size"], self.args["hidden_size"], num_layers=1, batch_first=True, bidirectional=False)
         init_lstm_wt(self.lstm)
+        self.lstm.flatten_parameters()
 
         if self.args["pointer_gen"]:
             self.p_gen_linear = nn.Linear(self.args["hidden_size"] * 4 + self.args["emb_size"], 1)
@@ -204,6 +207,7 @@ class PointerAttnDecoder(nn.Module):
                 if y_t_1[i] == UNK_idx:
                     y_t_1_embd[i] = self.oov_proj(torch.cat([s_t_1[0][:,i], s_t_1[1][:,i]], dim=-1)).squeeze()
         x = self.x_context(torch.cat((c_t_1, y_t_1_embd), 1))
+        self.lstm.flatten_parameters()
         lstm_out, s_t = self.lstm(x.unsqueeze(1), s_t_1)
 
         h_decoder, c_decoder = s_t
@@ -219,7 +223,7 @@ class PointerAttnDecoder(nn.Module):
         if self.args["pointer_gen"]:
             p_gen_input = torch.cat((c_t, s_t_hat, x), 1)  # B x (2*2*hidden_dim + emb_dim)
             p_gen = self.p_gen_linear(p_gen_input)
-            p_gen = F.sigmoid(p_gen)
+            p_gen = torch.sigmoid(p_gen)
 
         output = torch.cat((lstm_out.view(-1, self.args["hidden_size"]), c_t), 1) # B x hidden_dim * 3
         output1 = self.out1(output) # B x hidden_dim
