@@ -289,6 +289,7 @@ class Trainer(object):
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
+                # print(batch)
                 if self.args['debug'] and j>1100:
                     break
                 

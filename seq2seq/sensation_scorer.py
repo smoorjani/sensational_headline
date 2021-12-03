@@ -116,11 +116,16 @@ class PersuasivenessClassifier(nn.Module):
 
     # def forward(self, ids, mask, token_type_ids):
     def forward(self, input_batch):
-        mask = torch.subtract(torch.ones_like(input_batch), input_batch == self.lang.word2idx['PAD'])
+        print(input_batch, input_batch.shape)
+        padding_mask = ~(input_batch == self.lang.word2idx['PAD'])
         token_type_ids = torch.zeros_like(input_batch)
-        outputs = self.bert(input_batch, attention_mask=mask,
+        outputs = self.bert(input_batch, attention_mask=padding_mask,
                             token_type_ids=token_type_ids)
+        print(outputs.pooler_output.shape)
         output = self.dropout(outputs.pooler_output)
+        print(output.shape)
         output = self.linear(output)
+        print(output.shape)
         output = self.softmax(output)
-        return output
+        print(output.shape)
+        return torch.max(output)

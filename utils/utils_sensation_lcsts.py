@@ -14,9 +14,10 @@ class Lang:
         if vocab_file is not None:
             with open(vocab_file,"r") as f:
                 for w in f.readlines():
-                    self.idx2word[self.n_words] = w.split()[0].strip()
+                    word = w.split()[0].strip().replace('#', '')
+                    self.idx2word[self.n_words] = word
                     self.n_words += 1
-                    self.word2count[w.split()[0].strip()] = 0
+                    self.word2count[word] = 0
         self.word2idx = dict(zip(self.idx2word.values(), self.idx2word.keys()))
 
     def extend(self, vocab_file):
@@ -25,9 +26,10 @@ class Lang:
             for w in f.readlines():
                 if w in existing_words:
                     continue
-                self.idx2word[self.n_words] = w.split()[0].strip()
+                word = w.split()[0].strip().replace('#', '')
+                self.idx2word[self.n_words] = word
                 self.n_words += 1
-                self.word2count[w.split()[0].strip()] = 0
+                self.word2count[word] = 0
         self.word2idx = dict(zip(self.idx2word.values(), self.idx2word.keys()))
 
     def index_words(self, sent):

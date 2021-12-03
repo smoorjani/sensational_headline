@@ -238,7 +238,7 @@ def input_txt_to_batch(input_txt, lang):
     input_txt = [my_clean(" ".join(word_list)).split() for word_list in input_txt]
     input_idxs = [[lang.word2idx[w] if w in lang.word2idx else UNK_idx for w in sent] for sent in input_txt]
     max_len = max([len(txt) for txt in input_txt])
-    max_len = 33
+    # max_len = 33
     input_idxs = [sent_idxs + [PAD_idx] * (max_len - len(sent_idxs)) for sent_idxs in input_idxs]
     input_batch = Variable(torch.LongTensor(input_idxs))
     if USE_CUDA:

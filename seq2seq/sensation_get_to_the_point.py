@@ -383,8 +383,15 @@ class PointerAttnSeqToSeq(nn.Module):
         rouge_score = rouge([prediction], [article])[rouge_metric] + self.args["eps"]
 
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
-        
-        rewards =  sensation_model(input_txt_to_batch(decoded_sents, self.lang))
+        print(f'decoded: {decoded_sents}')
+        new_batch = input_txt_to_batch(decoded_sents, self.lang)
+        seperator_sent = ['[SEP]' * len(decoded_sents[0])]
+        separator = input_txt_to_batch(seperator_sent, self.lang)
+        print(f'new batch: {new_batch}')
+
+        new_batch = torch.cat((new_batch, separator, batch['target_batch']), 0)
+        rewards = sensation_model(new_batch)
+        print(f'rewards: {rewards}')
         w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list) for word_list in decoded_sents])
         if USE_CUDA:
             w = w.cuda()
