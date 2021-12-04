@@ -385,11 +385,14 @@ class PointerAttnSeqToSeq(nn.Module):
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
         print(f'decoded: {decoded_sents}')
         new_batch = input_txt_to_batch(decoded_sents, self.lang)
-        seperator_sent = ['[SEP]' * len(decoded_sents[0])]
-        separator = input_txt_to_batch(seperator_sent, self.lang)
+        separator_sent = ['[SEP]'] * new_batch.shape[0]
+        separator = [self.lang.word2idx[w] if w in self.lang.word2idx else UNK_idx for w in separator_sent]
+        separator = Variable(torch.LongTensor(separator)).unsqueeze(1)
+        if USE_CUDA:
+            separator = separator.cuda()
         print(f'new batch: {new_batch}')
-
-        new_batch = torch.cat((new_batch, separator, batch['target_batch']), 0)
+        print(new_batch.shape, separator.shape, batch['target_batch'].t().shape)
+        new_batch = torch.cat((new_batch, separator, batch['target_batch'].t()), 1)
         rewards = sensation_model(new_batch)
         print(f'rewards: {rewards}')
         w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list) for word_list in decoded_sents])

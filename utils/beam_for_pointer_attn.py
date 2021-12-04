@@ -111,7 +111,7 @@ class BeamSearch(object):
 
     def beam_search_sample(self, enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_0, coverage_t_0):
         #batch should have only one example by duplicate
-        
+        enc_lens = enc_lens.cpu()
         encoder_outputs, encoder_hidden = self.model.encoder(enc_batch, enc_lens)
         s_t_0 = self.model.reduce_state(encoder_hidden)
 
