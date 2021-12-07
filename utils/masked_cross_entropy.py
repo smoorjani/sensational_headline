@@ -11,7 +11,7 @@ def sequence_mask(sequence_length, max_len=None):
     seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
     seq_range_expand = Variable(seq_range_expand)
     if sequence_length.is_cuda:
-        seq_range_expand = seq_range_expand.cuda()
+        seq_range_expand = seq_range_expand.to("cuda:0")
     seq_length_expand = (sequence_length.unsqueeze(1)
                          .expand_as(seq_range_expand))
     return seq_range_expand < seq_length_expand
@@ -52,7 +52,7 @@ def masked_cross_entropy(logits, target, length):
 def accuracy(logits, target, length):
 
     if USE_CUDA:
-        length = Variable(torch.LongTensor(length)).cuda()
+        length = Variable(torch.LongTensor(length)).to("cuda:0")
     else:
         length = Variable(torch.LongTensor(length))    
 

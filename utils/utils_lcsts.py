@@ -143,10 +143,10 @@ def collate_fn(data):
     target_lengths = Variable(torch.LongTensor(target_lengths))
 
     if USE_CUDA:
-        input_batch = input_batch.cuda()
-        target_batch = target_batch.cuda()
-        input_lengths = input_lengths.cuda()
-        target_lengths = target_lengths.cuda()
+        input_batch = input_batch.to("cuda:0")
+        target_batch = target_batch.to("cuda:0")
+        input_lengths = input_lengths.to("cuda:0")
+        target_lengths = target_lengths.to("cuda:0")
 
     d = {}
     d["input_batch"] = input_batch
@@ -163,8 +163,8 @@ def collate_fn(data):
         target_ext_vocab_batch = Variable(target_ext_vocab_batch).transpose(0, 1)
 
         if USE_CUDA:
-            input_ext_vocab_batch = input_ext_vocab_batch.cuda()
-            target_ext_vocab_batch = target_ext_vocab_batch.cuda()
+            input_ext_vocab_batch = input_ext_vocab_batch.to("cuda:0")
+            target_ext_vocab_batch = target_ext_vocab_batch.to("cuda:0")
 
 
         d["input_ext_vocab_batch"] = input_ext_vocab_batch

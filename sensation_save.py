@@ -35,7 +35,7 @@ class Trainer(object):
         model = PointerAttnSeqToSeq(self.args, lang)
         self.model = model
         if USE_CUDA:
-            self.model = self.model.cuda()
+            self.model = self.model.to("cuda:0")
 
         logging.info(model)
         logging.info("encoder parameters: {}".format(count_parameters(model.encoder)))
@@ -52,7 +52,7 @@ class Trainer(object):
         checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
         self.sensation_model.load_state_dict(checkpoint['model'])
         if USE_CUDA:
-            self.sensation_model.cuda()
+            self.sensation_model.to("cuda:0")
 
         if self.args['optimizer'] == "adam":
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args['lr'])
@@ -164,16 +164,16 @@ class Trainer(object):
 
         self.optimizer.step()
 
-        self.loss += loss.data[0] 
-        self.acc += acc.data[0]
+        self.loss += loss.data 
+        self.acc += acc.data
         if self.args["use_rl"]:
-            self.reward += r.data[0]
+            self.reward += r.data
 
         if self.args["use_rl"]:
             self.rl_optimizer.zero_grad()
             expected_rewards_loss.backward()
             self.rl_optimizer.step()
-            self.expected_rewards_loss += expected_rewards_loss.data[0]
+            self.expected_rewards_loss += expected_rewards_loss.data
 
     def d_step(self, batch, probs, backward=True):
 
@@ -185,7 +185,7 @@ class Trainer(object):
         true_prob = self.D(input_batch, target_batch)
         true_labels = Variable(torch.ones(batch_size))
         if USE_CUDA:
-            true_labels = true_labels.cuda()
+            true_labels = true_labels.to("cuda:0")
         true_loss = F.binary_cross_entropy(true_prob, true_labels)
         if backward:
             true_loss.backward()
@@ -193,17 +193,17 @@ class Trainer(object):
 
         fake_labels = Variable(torch.zeros(batch_size))
         if USE_CUDA:
-            fake_labels = fake_labels.cuda()
+            fake_labels = fake_labels.to("cuda:0")
         fake_loss = F.binary_cross_entropy(probs, fake_labels)
         if backward:
             fake_loss.backward(retain_graph=True)
         fake_acc = ((probs > 0.5).long() == fake_labels.long()).float().sum() * 1.0 / fake_labels.size(0)
 
-        loss = (true_loss.data[0] + fake_loss.data[0]) / 2
+        loss = (true_loss.data + fake_loss.data) / 2
         # acc = (true_acc +  fake_acc) / 2
         if backward:
             logging.info("true loss is  {}, fake  loss is {}, true acc is {}, false acc is {}".format(true_loss, fake_loss, true_acc, fake_acc))
-        return true_acc.data[0], fake_acc.data[0]
+        return true_acc.data, fake_acc.data
 
     def training(self):
 
@@ -222,7 +222,7 @@ class Trainer(object):
         if self.args["rl_model_path"] is not None:
             self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
             if USE_CUDA:
-                self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
+                self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
             self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             step, best_metric = self.load_rl_model()
         elif self.args["path"] is not None:
@@ -231,7 +231,7 @@ class Trainer(object):
                 best_metric = 0.0
                 self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
                 if USE_CUDA:
-                    self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
+                    self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
                 self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
         else:
             pass
@@ -342,7 +342,7 @@ class Trainer(object):
             self.args["rl_model_path"] = rl_path
             self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
             if USE_CUDA:
-                self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
+                self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
             self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             step, _ = self.load_rl_model()
         elif self.args["path"] is not None:
@@ -350,7 +350,7 @@ class Trainer(object):
             if self.args["use_rl"]:
                 self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
                 if USE_CUDA:
-                    self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
+                    self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
                 self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
         else:
             pass

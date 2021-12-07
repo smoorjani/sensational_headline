@@ -151,9 +151,9 @@ def collate_fn(data):
     item_info["label"] = torch.cat(item_info["label"], 0)
 
     if USE_CUDA:
-        input_batch = input_batch.cuda()
-        input_lengths = input_lengths.cuda()
-        item_info["label"] = item_info["label"].cuda()
+        input_batch = input_batch.to("cuda:0")
+        input_lengths = input_lengths.to("cuda:0")
+        item_info["label"] = item_info["label"].to("cuda:0")
 
     d = {}
     d["input_batch"] = input_batch
@@ -242,5 +242,5 @@ def input_txt_to_batch(input_txt, lang):
     input_idxs = [sent_idxs + [PAD_idx] * (max_len - len(sent_idxs)) for sent_idxs in input_idxs]
     input_batch = Variable(torch.LongTensor(input_idxs))
     if USE_CUDA:
-        input_batch = input_batch.cuda()
+        input_batch = input_batch.to("cuda:0")
     return input_batch

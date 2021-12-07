@@ -55,9 +55,9 @@ class SensationCNN(nn.Module):
         self.out = nn.Linear(num_filters * len(filter_sizes), 1)
 
         if USE_CUDA:
-            self.embedding = self.embedding.cuda()
-            self.convs_q = self.convs_q.cuda()
-            self.out = self.out.cuda()
+            self.embedding = self.embedding.to("cuda:0")
+            self.convs_q = self.convs_q.to("cuda:0")
+            self.out = self.out.to("cuda:0")
 
 
     def forward(self, input_batch):
@@ -89,7 +89,7 @@ class SensationCNN(nn.Module):
             input_batch = batch["input_batch"]
             label = batch["label"]
             prob = self.forward(input_batch)
-            acc.append(((prob > 0.5).long() == label.long()).float().sum().data[0].cpu() * 1.0 / label.size(0))
+            acc.append(((prob > 0.5).long() == label.long()).float().sum().data.cpu() * 1.0 / label.size(0))
 
         return sum(acc) / len(acc)
 
@@ -103,7 +103,7 @@ class SensationCNN(nn.Module):
         loss.backward()
         acc = ((prob > 0.5).long() == label.long()).float().sum() * 1.0 / label.size(0) 
 
-        return loss.data[0], acc
+        return loss.data, acc
 
 class PersuasivenessClassifier(nn.Module):
     def __init__(self, lang, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
@@ -116,16 +116,11 @@ class PersuasivenessClassifier(nn.Module):
 
     # def forward(self, ids, mask, token_type_ids):
     def forward(self, input_batch):
-        print(input_batch, input_batch.shape)
         padding_mask = ~(input_batch == self.lang.word2idx['PAD'])
         token_type_ids = torch.zeros_like(input_batch)
         outputs = self.bert(input_batch, attention_mask=padding_mask,
                             token_type_ids=token_type_ids)
-        print(outputs.pooler_output.shape)
         output = self.dropout(outputs.pooler_output)
-        print(output.shape)
         output = self.linear(output)
-        print(output.shape)
         output = self.softmax(output)
-        print(output.shape)
         return torch.max(output)

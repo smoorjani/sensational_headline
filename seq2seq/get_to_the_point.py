@@ -63,8 +63,8 @@ class BiLSTMEncoder(nn.Module):
         h0_encoder = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
         c0_encoder = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
         if USE_CUDA:
-            h0_encoder = h0_encoder.cuda()
-            c0_encoder = c0_encoder.cuda()
+            h0_encoder = h0_encoder.to("cuda:0")
+            c0_encoder = c0_encoder.to("cuda:0")
         return h0_encoder, c0_encoder
 
     #seq_lens should be in descending order
@@ -86,7 +86,7 @@ class BiLSTMEncoder(nn.Module):
                     if enc_input[i, j] == UNK_idx:
                         unk_emb = Variable(torch.zeros(2 * self.hidden_size))
                         if USE_CUDA:
-                            unk_emb = unk_emb.cuda()
+                            unk_emb = unk_emb.to("cuda:0")
                         if j > 0:
                             unk_emb[:self.hidden_size] = h[i, j - 1, :self.hidden_size]
                         if j < seq_lens[i] - 1:
@@ -277,10 +277,10 @@ class DiscriminatorCNN(nn.Module):
         self.out = nn.Linear(num_filters * len(filter_sizes) * 2, 1)
 
         if USE_CUDA:
-            self.embedding = self.embedding.cuda()
-            self.convs_q = self.convs_q.cuda()
-            self.convs_a = self.convs_a.cuda()
-            self.out = self.out.cuda()
+            self.embedding = self.embedding.to("cuda:0")
+            self.convs_q = self.convs_q.to("cuda:0")
+            self.convs_a = self.convs_a.to("cuda:0")
+            self.out = self.out.to("cuda:0")
 
 
     def forward(self, input_batch, target_batch):
@@ -329,10 +329,10 @@ class PointerAttnSeqToSeq(nn.Module):
         self.reduce_state = ReduceState(self.args)
 
         if USE_CUDA:
-            self.encoder = self.encoder.cuda()
-            self.decoder = self.decoder.cuda()
-            self.embedding = self.embedding.cuda()
-            self.reduce_state = self.reduce_state.cuda()
+            self.encoder = self.encoder.to("cuda:0")
+            self.decoder = self.decoder.to("cuda:0")
+            self.embedding = self.embedding.to("cuda:0")
+            self.reduce_state = self.reduce_state.to("cuda:0")
 
     def get_encode_states(self, batch):
 
@@ -372,13 +372,13 @@ class PointerAttnSeqToSeq(nn.Module):
 
         if USE_CUDA:
             if enc_batch_extend_vocab is not None:
-                    enc_batch_extend_vocab = enc_batch_extend_vocab.cuda()
+                    enc_batch_extend_vocab = enc_batch_extend_vocab.to("cuda:0")
             if extra_zeros is not None:
-                extra_zeros = extra_zeros.cuda()
-            c_t_1 = c_t_1.cuda()
+                extra_zeros = extra_zeros.to("cuda:0")
+            c_t_1 = c_t_1.to("cuda:0")
 
             if coverage is not None:
-                coverage = coverage.cuda()
+                coverage = coverage.to("cuda:0")
 
         return enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage
 
@@ -466,7 +466,7 @@ class PointerAttnSeqToSeq(nn.Module):
         batch_size = len(decoded_sents)
         rewards = Variable(torch.zeros(batch_size).float())
         if USE_CUDA:
-            rewards = rewards.cuda()
+            rewards = rewards.to("cuda:0")
 
         # decoded_sents = self.decoded_batch_to_txt(all_targets, batch)
         for i, sent in enumerate(decoded_sents):
@@ -478,7 +478,7 @@ class PointerAttnSeqToSeq(nn.Module):
     #     batch_size = all_targets[0].size(0)
     #     rewards = Variable(torch.zeros(batch_size).float())
     #     if USE_CUDA:
-    #         rewards = rewards.cuda()
+    #         rewards = rewards.to("cuda:0")
       
     #     decoded_sents = self.decoded_batch_to_txt(all_targets, batch)
     #     for i, sent in enumerate(decoded_sents):
@@ -509,7 +509,7 @@ class PointerAttnSeqToSeq(nn.Module):
     #             else:
     #                 y_t[i, j] = all_targets[j][i]
     #     if USE_CUDA:
-    #         y_t = y_t.cuda()
+    #         y_t = y_t.to("cuda:0")
 
     #     probs =  D(batch["input_batch"].transpose(0,1), y_t) +  self.args["eps"]
 
@@ -552,8 +552,8 @@ class PointerAttnSeqToSeq(nn.Module):
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            y_t_1 = y_t_1.cuda()
-            step_mask = step_mask.cuda()
+            y_t_1 = y_t_1.to("cuda:0")
+            step_mask = step_mask.to("cuda:0")
         all_ext_vocab_targets = []
         for di in range(self.args["max_r"]):
             final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
@@ -573,7 +573,7 @@ class PointerAttnSeqToSeq(nn.Module):
                 else:
                     y_t_1[i] = ext_vocab_target[i]
             if USE_CUDA:
-                y_t_1 = y_t_1.cuda()
+                y_t_1 = y_t_1.to("cuda:0")
         ## pad ext_vocab_batch with pad_idx 
         seq_len = self.args["max_r"]
         y_t = Variable(torch.ones(batch_size, seq_len) * PAD_idx).long()
@@ -584,7 +584,7 @@ class PointerAttnSeqToSeq(nn.Module):
                     break
                 y_t[i, j] = all_ext_vocab_targets[j][i]
         if USE_CUDA:
-            y_t = y_t.cuda()
+            y_t = y_t.to("cuda:0")
             
         all_step_mask = torch.stack(all_step_mask, dim=1)
         target_lens = torch.sum(all_step_mask,dim=1)
@@ -599,7 +599,7 @@ class PointerAttnSeqToSeq(nn.Module):
                 else:
                     all_targets[i, j] = all_ext_vocab_targets[i,j]
         if USE_CUDA:
-            all_targets = all_targets.cuda()
+            all_targets = all_targets.to("cuda:0")
         return all_targets, all_ext_vocab_targets, target_lens.long()
 
     def get_rl_loss(self, batch, sensation_model):
@@ -617,8 +617,8 @@ class PointerAttnSeqToSeq(nn.Module):
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            y_t_1 = y_t_1.cuda()
-            step_mask = step_mask.cuda()
+            y_t_1 = y_t_1.to("cuda:0")
+            step_mask = step_mask.to("cuda:0")
         all_targets = []
         all_output1 = []
         for di in range(self.args["max_r"]):
@@ -648,7 +648,7 @@ class PointerAttnSeqToSeq(nn.Module):
                 else:
                     y_t_1[i] = target[i]
             if USE_CUDA:
-                y_t_1 = y_t_1.cuda()
+                y_t_1 = y_t_1.to("cuda:0")
 
         baseline_rewards = [self.expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach() \
                                             for output1, step_mask in zip(all_output1, all_step_mask)]
@@ -686,7 +686,7 @@ class PointerAttnSeqToSeq(nn.Module):
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         if USE_CUDA:
-            y_t_1 = y_t_1.cuda()
+            y_t_1 = y_t_1.to("cuda:0")
 
         for di in range(min(max_dec_len, self.args["max_r"])):
             final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
@@ -724,7 +724,7 @@ class PointerAttnSeqToSeq(nn.Module):
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         if USE_CUDA:
-            y_t_1 = y_t_1.cuda()
+            y_t_1 = y_t_1.to("cuda:0")
 
         for di in range(min(max_dec_len, self.args["max_r"])):
             final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
@@ -752,8 +752,8 @@ class PointerAttnSeqToSeq(nn.Module):
         sampled_length = Variable(torch.zeros(batch_size)).long()
         sampled_outputs = Variable(torch.ones(batch_size,self.max_r) * PAD_idx).long()
         if USE_CUDA:
-            sampled_outputs = sampled_outputs.cuda()
-            sampled_length = sampled_length.cuda()
+            sampled_outputs = sampled_outputs.to("cuda:0")
+            sampled_length = sampled_length.to("cuda:0")
         for i in range(batch_size):
             for j in range(self.max_r):
                 sampled_outputs[i,j] = decoder_outputs[j][i]
@@ -769,12 +769,12 @@ class PointerAttnSeqToSeq(nn.Module):
         batch_size = sample.size(1)
         decoder_inputs = Variable(torch.LongTensor([SOS_idx] * batch_size))
         if USE_CUDA:
-            decoder_inputs = decoder_inputs.cuda()
+            decoder_inputs = decoder_inputs.to("cuda:0")
         log_probs = []
         for t in range(self.max_r):
             decoder_emb = self.embedding(decoder_inputs)
             if USE_CUDA:
-                decoder_emb = decoder_emb.cuda()
+                decoder_emb = decoder_emb.to("cuda:0")
             decoder_vocab, decoder_hidden = self.decoder(decoder_emb, decoder_hidden, encoder_outputs)
             decoder_vocab = F.log_softmax(decoder_vocab, 1)
             decoder_inputs = sample[t]

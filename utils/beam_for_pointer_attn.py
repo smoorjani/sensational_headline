@@ -133,7 +133,7 @@ class BeamSearch(object):
                              for t in latest_tokens]
             y_t_1 = Variable(torch.LongTensor(latest_tokens))
             if USE_CUDA:
-                y_t_1 = y_t_1.cuda()
+                y_t_1 = y_t_1.to("cuda:0")
             all_state_h =[]
             all_state_c = []
 
