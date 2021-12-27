@@ -384,22 +384,31 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
         #print(f'decoded: {decoded_sents}')
+        # Concatenate the two arguments with a separator tag
         new_batch = input_txt_to_batch(decoded_sents, self.lang)
         separator_sent = ['[SEP]'] * new_batch.shape[0]
         separator = [self.lang.word2idx[w] if w in self.lang.word2idx else UNK_idx for w in separator_sent]
         separator = Variable(torch.LongTensor(separator)).unsqueeze(1)
         if USE_CUDA:
             separator = separator.to("cuda:0")
-        #print(new_batch.shape, separator.shape, batch['target_batch'].t().shape)
         new_batch = torch.cat((new_batch, separator, batch['target_batch'].t()), 1)
-        #print(f'new batch: {new_batch.device}')
-        new_batch = new_batch.to('cuda:1')
-        #print(f'updated new batch: {new_batch.device}')
-        rewards = sensation_model(new_batch)
-        #print(f'rewards: {rewards.device}')
+
+        # Ensure that the max length of the tensor is 512. Fill with padding.
+        batch_size, max_len = new_batch.shape
+        padded_batch = torch.full((batch_size, 512), self.lang.word2idx['[PAD]']).type(torch.LongTensor)
+        padded_batch[:, :max_len] = new_batch
+        padded_batch = padded_batch.to('cuda:1')
+        # Prevents the libcublas error?
+        try:
+            rewards = sensation_model(padded_batch)
+        except RuntimeError:
+            print('Runtime Error!')
+            print(f'decoded: {decoded_sents}')
+            print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
+            raise RuntimeError
+
         rewards = rewards.to('cuda:0')
-        #print(f'updated rewards: {rewards.device}')
-        w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list) for word_list in decoded_sents])
+        w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list) if len(word_list) else 1 for word_list in decoded_sents])
         if USE_CUDA:
             w = w.to("cuda:0")
 

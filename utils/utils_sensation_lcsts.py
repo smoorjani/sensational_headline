@@ -259,7 +259,7 @@ def prepare_data_seq(batch_size, vocab, debug=False , shuffle=True, pointer_gen=
         if debug:
         	max_len = 20000
         else:
-        	max_len = None
+        	max_len = 256
         
         train = get_seq(d_train, lang, batch_size, True, max_q, max_len, pointer_gen=pointer_gen, shuffle=shuffle)
         logging.info("start get seq for dev")

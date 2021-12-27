@@ -133,6 +133,7 @@ class Trainer(object):
 
         train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], vocab=vocab, thd=args["thd"])
         args["vocab_size"] = lang.n_words
+        args["output_vocab_size"] = lang.n_words
         args["max_q"] = max_q
         args["max_r"] = max_r
 
@@ -166,7 +167,8 @@ class Trainer(object):
         # self.sensation_model.load_state_dict(checkpoint['model'])
         self.sensation_model = PersuasivenessClassifier(self.lang)
         # sys.path.insert(0, '../persuasive_classifier/models')
-        model = self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
+        self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
+        self.sensation_model.bert.resize_token_embeddings(len(vocab))
         if USE_CUDA:
             self.sensation_model.to('cuda:1')
             print('Sensation model is on: ', next(self.sensation_model.parameters()).device)
@@ -221,9 +223,9 @@ class Trainer(object):
             print_expected_rewards_loss_avg = self.expected_rewards_loss / self.print_every
         self.print_every += 1
         if self.args["use_rl"]:
-            return 'step: {}, L:{:.2f}, acc:{:.2f}, r:{:.3f}, r_loss:{:.4f}'.format(step, print_loss_avg, print_acc_avg, print_reward_avg, print_expected_rewards_loss_avg)
+            return f'step: {step}, L:{print_loss_avg}, acc:{print_acc_avg}, r:{print_reward_avg}, r_loss:{print_expected_rewards_loss_avg}'
         else:
-            return 'step: {}, L:{:.2f}, acc:{:.2f}, r:{:.3f}'.format(step, print_loss_avg, print_acc_avg, print_reward_avg)
+            return f'step: {step}, L:{print_loss_avg}, acc:{print_acc_avg}, r:{print_reward_avg}'
 
 
     def train_step(self, batch, step, reset):
@@ -301,7 +303,7 @@ class Trainer(object):
                 else:
                     logging_step = 10
 
-                if j % logging_step == 0:
+                if j % logging_step == 0 and j:
                     # if self.args["use_rl"]:
                     #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
                     #     os.makedirs(save_folder, exist_ok=True)
