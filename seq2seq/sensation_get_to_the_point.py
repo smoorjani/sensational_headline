@@ -17,6 +17,14 @@ torch.manual_seed(123)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(123)
 
+def isEnglish(s):
+    try:
+        s.encode(encoding='utf-8').decode('ascii')
+    except UnicodeDecodeError:
+        return False
+    else:
+        return True
+
 def init_lstm_wt(lstm):
     for names in lstm._all_weights:
         for name in names:
@@ -384,6 +392,15 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
         #print(f'decoded: {decoded_sents}')
+        print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
+        if not np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])):
+            for i, sent in enumerate(decoded_sents):
+                new_sent = [word if isEnglish(word) else '' for word in sent]
+                decoded_sents[i] = new_sent
+                    
+            # print([(isEnglish(' '.join(sent)), sent) for sent in decoded_sents])
+            print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
+            print('==================')
         # Concatenate the two arguments with a separator tag
         new_batch = input_txt_to_batch(decoded_sents, self.lang)
         separator_sent = ['[SEP]'] * new_batch.shape[0]
@@ -391,6 +408,7 @@ class PointerAttnSeqToSeq(nn.Module):
         separator = Variable(torch.LongTensor(separator)).unsqueeze(1)
         if USE_CUDA:
             separator = separator.to("cuda:0")
+        print(f"Shape of arguments: {new_batch.shape}, {separator.shape}, {batch['target_batch'].t().shape}")
         new_batch = torch.cat((new_batch, separator, batch['target_batch'].t()), 1)
 
         # Ensure that the max length of the tensor is 512. Fill with padding.
@@ -399,12 +417,15 @@ class PointerAttnSeqToSeq(nn.Module):
         padded_batch[:, :max_len] = new_batch
         padded_batch = padded_batch.to('cuda:1')
         # Prevents the libcublas error?
+
         try:
             rewards = sensation_model(padded_batch)
         except RuntimeError:
             print('Runtime Error!')
             print(f'decoded: {decoded_sents}')
             print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
+            print(f'new_batch: {new_batch.shape}, padded_batch: {padded_batch.shape}')
+            print([isEnglish(' '.join(sent)) for sent in decoded_sents])
             raise RuntimeError
 
         rewards = rewards.to('cuda:0')

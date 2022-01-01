@@ -4,6 +4,7 @@ from torch.autograd import Variable
 from utils.config import *
 import pickle
 import logging
+from transformers import BertTokenizer
 
 class Lang:
     def __init__(self, vocab_file=None):
@@ -67,12 +68,13 @@ class Dataset(data.Dataset):
         item["input_txt"] = self.x_seq[idx]
         item["target_txt"] = self.y_seq[idx]
         item["sensation_score"] = self.s_seq[idx]
-        item["input_batch"] = self.process(item["input_txt"], False)
-        item["target_batch"] = self.process(item["target_txt"], True)
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        item["input_batch"] = self.process(item["input_txt"], False, tokenizer)
+        item["target_batch"] = self.process(item["target_txt"], True, tokenizer)
 
         if self.pointer_gen:
-            item["input_ext_vocab_batch"], item["article_oovs"] = self.process_input(item["input_txt"])
-            item["target_ext_vocab_batch"] = self.process_target(item["target_txt"], item["article_oovs"])
+            item["input_ext_vocab_batch"], item["article_oovs"] = self.process_input(item["input_txt"], tokenizer)
+            item["target_ext_vocab_batch"] = self.process_target(item["target_txt"], item["article_oovs"], tokenizer)
 
         item["max_q"] = self.max_q
 
@@ -81,41 +83,48 @@ class Dataset(data.Dataset):
     def __len__(self):
         return len(self.y_seq)
 
-    def process_target(self, target_txt, oovs):
+    def process_target(self, target_txt, oovs, tokenizer):
         # seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
-        seq = []
-        for word in target_txt.strip().split():
-            if word in self.word2idx:
-                seq.append(self.word2idx[word])
-            elif word in oovs:
-                seq.append(self.vocab_size + oovs.index(word))
-            else:
-                seq.append(UNK_idx)
-        seq.append(EOS_idx)
-        seq = torch.LongTensor(seq)
-        return seq
+        # seq = []
+        # for word in target_txt.strip().split():
+        #     if word in self.word2idx:
+        #         seq.append(self.word2idx[word])
+        #     elif word in oovs:
+        #         seq.append(self.vocab_size + oovs.index(word))
+        #     else:
+        #         seq.append(UNK_idx)
+        # seq.append(EOS_idx)
+        # seq = torch.LongTensor(seq)
+        seq = tokenizer(target_txt.strip() + " [EOS]")['input_ids']
+        return torch.LongTensor(seq)
 
-    def process_input(self, input_txt):
-        seq = []
-        oovs = []
-        for word in input_txt.strip().split():
-            if word in self.word2idx:
-                seq.append(self.word2idx[word])
-            else:
-                if word not in oovs:
-                    oovs.append(word)
-                seq.append(self.vocab_size + oovs.index(word))
+    def process_input(self, input_txt, tokenizer):
+        # seq = []
+        # oovs = []
+        # for word in input_txt.strip().split():
+        #     if word in self.word2idx:
+        #         seq.append(self.word2idx[word])
+        #     else:
+        #         if word not in oovs:
+        #             oovs.append(word)
+        #         seq.append(self.vocab_size + oovs.index(word))
         
-        seq = torch.LongTensor(seq)
-        return seq, oovs
+        # seq = torch.LongTensor(seq)
+        # return seq, oovs
+        seq = tokenizer(input_txt.strip())['input_ids']  
+        return torch.LongTensor(seq), []
 
-    def process(self, input_txt, target):
+
+
+    def process(self, input_txt, target, tokenizer):
         
         if target:
             # seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
-            seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
+            # seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
+            seq = tokenizer(input_txt.strip() + " [EOS]")['input_ids']
         else:
-            seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()]
+            # seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()]
+            seq = tokenizer(input_txt.strip())['input_ids']
         seq = torch.Tensor(seq)
         return seq
 
@@ -259,7 +268,7 @@ def prepare_data_seq(batch_size, vocab, debug=False , shuffle=True, pointer_gen=
         if debug:
         	max_len = 20000
         else:
-        	max_len = 256
+        	max_len = 384
         
         train = get_seq(d_train, lang, batch_size, True, max_q, max_len, pointer_gen=pointer_gen, shuffle=shuffle)
         logging.info("start get seq for dev")

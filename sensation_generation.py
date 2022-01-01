@@ -294,7 +294,14 @@ class Trainer(object):
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
-                # print(batch)
+                print(batch)
+                print('Decoding: ')
+                #====
+                decoded_sents = self.model.decode_batch(batch,"beam")
+                print('Decoded:', decoded_sents)
+                print(len(decoded_sents), [len(sent) for sent in decoded_sents])
+                #====
+                return
                 if self.args['debug'] and j>1100:
                     break
                 
@@ -308,6 +315,7 @@ class Trainer(object):
                     #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
                     #     os.makedirs(save_folder, exist_ok=True)
                     #     self.save_decode_sents(self.test, save_folder+"/prediction_step_{}.txt".format(step))
+
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
                     old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
                     decoded_sents = self.model.decode_batch(batch,"beam")
