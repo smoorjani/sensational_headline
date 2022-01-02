@@ -159,8 +159,8 @@ class Trainer(object):
 
         self.loss, self.acc, self.reward, self.print_every = 0.0, 0.0, 0.0, 1
 
-        assert args["sensation_scorer_path"] is not None
-        opts = torch.load(args["sensation_scorer_path"]+"/args.th")
+        # assert args["sensation_scorer_path"] is not None
+        # opts = torch.load(args["sensation_scorer_path"]+"/args.th")
         # self.sensation_model = SensationCNN(opts, self.lang)
         # logging.info("load checkpoint from {}".format(args["sensation_scorer_path"]))
         # checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
@@ -294,14 +294,14 @@ class Trainer(object):
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
-                print(batch)
-                print('Decoding: ')
+                #print(batch)
+                #print('Decoding: ')
                 #====
-                decoded_sents = self.model.decode_batch(batch,"beam")
-                print('Decoded:', decoded_sents)
-                print(len(decoded_sents), [len(sent) for sent in decoded_sents])
+                # decoded_sents = self.model.decode_batch(batch,"beam")
+                #print('Decoded:', decoded_sents)
+                #print(len(decoded_sents), [len(sent) for sent in decoded_sents])
                 #====
-                return
+                # return
                 if self.args['debug'] and j>1100:
                     break
                 
@@ -339,6 +339,7 @@ class Trainer(object):
                         best_metric = dev_metric
                         cnt=0
                         if self.args["use_rl"]:
+                            print('Saving model...')
                             directory = self.save_model("Rl", best_metric, step)
                             with open(directory + "/prediction", "w") as f:
                                 f.write("\n".join(["{}\t{:.5f}\n{}\t{:.5f}\n{}\n".format(h,r,g,s,a) for h,g,r,s,a in zip(hyp, ref, rewards, sensation_scores, articles)]))

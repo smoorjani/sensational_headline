@@ -392,15 +392,15 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
         #print(f'decoded: {decoded_sents}')
-        print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
+        # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
         if not np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])):
             for i, sent in enumerate(decoded_sents):
                 new_sent = [word if isEnglish(word) else '' for word in sent]
                 decoded_sents[i] = new_sent
                     
             # print([(isEnglish(' '.join(sent)), sent) for sent in decoded_sents])
-            print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
-            print('==================')
+            # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
+            # print('==================')
         # Concatenate the two arguments with a separator tag
         new_batch = input_txt_to_batch(decoded_sents, self.lang)
         separator_sent = ['[SEP]'] * new_batch.shape[0]
@@ -408,7 +408,7 @@ class PointerAttnSeqToSeq(nn.Module):
         separator = Variable(torch.LongTensor(separator)).unsqueeze(1)
         if USE_CUDA:
             separator = separator.to("cuda:0")
-        print(f"Shape of arguments: {new_batch.shape}, {separator.shape}, {batch['target_batch'].t().shape}")
+        # print(f"Shape of arguments: {new_batch.shape}, {separator.shape}, {batch['target_batch'].t().shape}")
         new_batch = torch.cat((new_batch, separator, batch['target_batch'].t()), 1)
 
         # Ensure that the max length of the tensor is 512. Fill with padding.

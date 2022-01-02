@@ -69,21 +69,21 @@ class BeamSearch(object):
     def beam_search(self, batch):
 
         batch_size = batch["input_lengths"].size(0)
-        print(batch_size, self.args["beam_size"])
+        # print(batch_size, self.args["beam_size"])
         decoded_sents = []
     
         for i in range(batch_size):
             # duplicates the batch by beam size
             new_batch = dup_batch(batch, i, self.args["beam_size"])
             enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_0, coverage_t_0 = self.model.get_input_from_batch(new_batch)
-            print('Vars: ', enc_batch, enc_padding_mask, enc_lens)
+            # print('Vars: ', enc_batch, enc_padding_mask, enc_lens)
             # Run beam search to get best Hypothesis
             best_summary = self.beam_search_sample(enc_batch, enc_padding_mask, enc_lens, 
                                             enc_batch_extend_vocab, extra_zeros, c_t_0, coverage_t_0)
-            print(best_summary)
+            # print(best_summary)
             # Extract the output ids from the hypothesis and convert back to words
             output_ids = [int(t) for t in best_summary.tokens[1:]]
-            print('Outputs: ', output_ids, len(output_ids))
+            # print('Outputs: ', output_ids, len(output_ids))
             if self.args["pointer_gen"]:
                 art_oovs = batch["article_oovs"][i]
                 len_oovs = len(art_oovs)
