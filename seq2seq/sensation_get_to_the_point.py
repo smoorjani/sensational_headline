@@ -297,7 +297,7 @@ class PointerAttnSeqToSeq(nn.Module):
             self.reduce_state = self.reduce_state.to("cuda:0")
 
     def get_encode_states(self, batch):
-
+        # NEVER USED
         input_batch = batch['input_batch']
         input_lengths = batch['input_lengths']
 
@@ -377,12 +377,8 @@ class PointerAttnSeqToSeq(nn.Module):
             hyp.append(sent)
         return hyp
 
-    def compute_sensation_reward(self, sent, input_txt, target_txt, lexicons):
-
-        return 0.0, 0.0, 0.0, 0.0, 0.0
-
     def compute_rouge_reward(self, sent, input_txt, target_txt):
-
+        # not used
         prediction = " ".join("".join(sent))
         if len(prediction.split()) < 1:
             return 0.0
@@ -391,6 +387,9 @@ class PointerAttnSeqToSeq(nn.Module):
         rouge_score = rouge([prediction], [article])[rouge_metric] + self.args["eps"]
 
     def get_sensation_reward(self, decoded_sents, batch, sensation_model):
+        '''
+        Gets R_sen
+        '''
         #print(f'decoded: {decoded_sents}')
         # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
         if not np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])):
@@ -445,7 +444,7 @@ class PointerAttnSeqToSeq(nn.Module):
  
     def sample_batch(self, batch):
         enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
-
+        # remove this
         encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
         s_t_1 = self.reduce_state(encoder_hidden)
 
@@ -524,6 +523,7 @@ class PointerAttnSeqToSeq(nn.Module):
             step_mask = step_mask.to("cuda:0")
         all_targets = []
         all_output1 = []
+        # in len of maximum size of headlines
         for di in range(self.args["max_r"]):
             final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
                                                         encoder_outputs, enc_padding_mask, c_t_1,
@@ -531,7 +531,9 @@ class PointerAttnSeqToSeq(nn.Module):
                                                                     coverage, di, training=True)
             target = torch.multinomial(final_dist.data, 1).long().squeeze() # sampling
             all_targets.append(target.detach())
+            # this is some hidden state (batch * hidden_dim) -> o_t
             all_output1.append(output1)
+            # TODO:why are the gold probs coming from the decoder? seems to be misnamed
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + self.args["eps"])
             
@@ -550,6 +552,7 @@ class PointerAttnSeqToSeq(nn.Module):
             if USE_CUDA:
                 y_t_1 = y_t_1.to("cuda:0")
 
+        # this is the linear layer that calculates \hat{R}_t
         baseline_rewards = [self.expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach() \
                                             for output1, step_mask in zip(all_output1, all_step_mask)]
         baseline_rewards = torch.cat(baseline_rewards, dim=1)
@@ -559,8 +562,10 @@ class PointerAttnSeqToSeq(nn.Module):
         total_reward, probs = self.get_reward(decoded_sents, batch, sensation_model)
         total_reward = total_reward.unsqueeze(1)
         
+        # getting (R - \hat{R}_t)
         reward =  total_reward.detach() - baseline_rewards.detach()
         sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
+        # this is for ARL
         if use_s_score:
             batch_avg_loss = sum_losses/dec_lens_var.float()*(1 - batch["sensation_scores"])
         else:
@@ -577,7 +582,7 @@ class PointerAttnSeqToSeq(nn.Module):
         return total_reward.mean(), loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
 
     def get_loss(self, batch, use_s_score=False, return_full_loss=False):
-
+        # calculates MLE loss
         enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
         dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch = self.get_output_from_batch(batch)
 
@@ -597,7 +602,6 @@ class PointerAttnSeqToSeq(nn.Module):
                                                         extra_zeros, enc_batch_extend_vocab,
                                                                     coverage, di, training=True)
             target = target_batch[:, di]
-
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + self.args["eps"])
             if self.args["is_coverage"]:
@@ -606,6 +610,7 @@ class PointerAttnSeqToSeq(nn.Module):
             step_mask = dec_padding_mask[:, di]
             step_loss = step_loss * step_mask
             step_losses.append(step_loss)
+            # TODO: forces to be teacher's answer and calculates loss based students? what is the teacher and why is this not performing
             y_t_1 = dec_batch[:, di]  # Teacher forcing
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
@@ -674,6 +679,7 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_log_prob_of_sample(self, sample, decoder_hidden, encoder_outputs):
         ## get log prob of sample
+        # NOT USED
         sample = sample.transpose(0,1) ## seq_len * batch_size
         batch_size = sample.size(1)
         decoder_inputs = Variable(torch.LongTensor([SOS_idx] * batch_size))
@@ -762,8 +768,9 @@ class PointerAttnSeqToSeq(nn.Module):
         hyp, ref = [], []
         decoded_sents = self.decode_batch(batch, decode_type)
         for i, sent in enumerate(decoded_sents):
-            hyp.append("  ".join("".join(sent))) 
-            ref.append(" ".join("".join(batch["target_txt"][i].split())))
-
+            # hyp.append("  ".join("".join(sent)))
+            hyp.append(" ".join(sent))
+            # ref.append(" ".join("".join(batch["target_txt"][i].split())))
+            ref.append(batch["target_txt"][i])
         return hyp, ref
                 

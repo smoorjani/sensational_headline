@@ -31,7 +31,7 @@ class NNParams(object):
 
         # seq2seq parameters
         ## nn parameters
-        parser.add_argument('-batch_size', type=int, default=128, help="batch size")
+        parser.add_argument('-batch_size', type=int, default=16, help="batch size")
         parser.add_argument('-emb_size', type=int, default=350, help="embedding size")
         parser.add_argument('-output_vocab_size', type=int, default=50000, help="output_vocab_size")
         parser.add_argument('-hidden_size', type=int, default=500, help="hidden size")

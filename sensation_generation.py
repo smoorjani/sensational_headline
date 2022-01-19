@@ -116,7 +116,7 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        args['batch_size'] = 16
+        args['batch_size'] = 8
         # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         # lang = Lang(list(tokenizer.encoder.keys()))
         with open("vocab.txt", "r") as f:
@@ -133,6 +133,7 @@ class Trainer(object):
 
         train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], vocab=vocab, thd=args["thd"])
         args["vocab_size"] = lang.n_words
+        print(args["vocab_size"])
         args["output_vocab_size"] = lang.n_words
         args["max_q"] = max_q
         args["max_r"] = max_r
@@ -310,7 +311,7 @@ class Trainer(object):
                 else:
                     logging_step = 10
 
-                if j % logging_step == 0 and j:
+                if j % logging_step == 0:
                     # if self.args["use_rl"]:
                     #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
                     #     os.makedirs(save_folder, exist_ok=True)
@@ -319,6 +320,7 @@ class Trainer(object):
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
                     old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
                     decoded_sents = self.model.decode_batch(batch,"beam")
+                    print('Decoded:', decoded_sents)
                     sensation_rewards = self.model.get_sensation_reward(decoded_sents, batch, self.sensation_model)
                     rewards = self.model.get_reward(decoded_sents, batch, self.sensation_model)[0]
                     for i,(prediction, ground_truth, old_pred) in enumerate(zip(hyp, ref, old_hyp)):

@@ -84,7 +84,7 @@ class Dataset(data.Dataset):
         return len(self.y_seq)
 
     def process_target(self, target_txt, oovs, tokenizer):
-        # seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
+        ## seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
         # seq = []
         # for word in target_txt.strip().split():
         #     if word in self.word2idx:

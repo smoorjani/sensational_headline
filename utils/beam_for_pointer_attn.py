@@ -159,11 +159,13 @@ class BeamSearch(object):
             final_dist, s_t, c_t, attn_dist, p_gen, coverage_t, _ = self.model.decoder(y_t_1, s_t_1,
                                                         encoder_outputs, enc_padding_mask, c_t_1,
                                                         extra_zeros, enc_batch_extend_vocab, coverage_t_1, steps, training=False)
+            # print('Decoder outputs: ', final_dist, s_t, c_t, attn_dist, p_gen, coverage_t)
             # if self.args["use_rl"]:
             #     final_dist[:, self.lang.word2idx["举动"]] = 0.0
             #     final_dist[:, self.lang.word2idx["受益者"]] = 0.0
 
             topk_log_probs, topk_ids = torch.topk(final_dist, self.args["beam_size"] * 2)
+            # print('Topk: ', topk_log_probs, topk_ids)
 
             dec_h, dec_c = s_t
             dec_h = dec_h.squeeze()
@@ -194,11 +196,13 @@ class BeamSearch(object):
                 else:
                     beams.append(h)
                 if len(beams) == self.args["beam_size"] or len(results) == self.args["beam_size"]:
+                    # print('Beams: ', all_beams, beams)
                     break
-
+            # print('Beams: ', all_beams, beams)
             steps += 1
 
         if len(results) == 0:
+            # print('early stopping?')
             results = beams
 
         beams_sorted = self.sort_beams(results)
