@@ -17,6 +17,8 @@ torch.manual_seed(123)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(123)
 
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer
+
 def isEnglish(s):
     try:
         s.encode(encoding='utf-8').decode('ascii')
@@ -214,9 +216,11 @@ class PointerAttnDecoder(nn.Module):
             for i in range(y_t_1.size(0)):
                 if y_t_1[i] == UNK_idx:
                     y_t_1_embd[i] = self.oov_proj(torch.cat([s_t_1[0][:,i], s_t_1[1][:,i]], dim=-1)).squeeze()
+        # =====
         x = self.x_context(torch.cat((c_t_1, y_t_1_embd), 1))
         self.lstm.flatten_parameters()
         lstm_out, s_t = self.lstm(x.unsqueeze(1), s_t_1)
+        # =====
 
         h_decoder, c_decoder = s_t
         s_t_hat = torch.cat((h_decoder.view(-1, self.args["hidden_size"]),
@@ -233,8 +237,10 @@ class PointerAttnDecoder(nn.Module):
             p_gen = self.p_gen_linear(p_gen_input)
             p_gen = torch.sigmoid(p_gen)
 
+        # =====
         output = torch.cat((lstm_out.view(-1, self.args["hidden_size"]), c_t), 1) # B x hidden_dim * 3
         output1 = self.out1(output) # B x hidden_dim
+        # =====
 
         #output = F.relu(output)
 
@@ -283,10 +289,17 @@ class PointerAttnSeqToSeq(nn.Module):
         else:
             raise ValueError("not implemented")
         
-        if self.args["decoder_type"] == "pointer_attn":
-            self.decoder = PointerAttnDecoder(self.args, self.embedding)
-        else:
-            raise ValueError("not implemented")
+        config = GPT2Config.from_pretrained("gpt2", output_hidden_states=True, output_attentions=True)
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        config.pad_token_id = config.eos_token_id
+        self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
+
+        # if self.args["decoder_type"] == "pointer_attn":
+        #     self.decoder = PointerAttnDecoder(self.args, self.embedding)
+        # else:
+        #     raise ValueError("not implemented")
 
         self.reduce_state = ReduceState(self.args)
 
@@ -400,6 +413,7 @@ class PointerAttnSeqToSeq(nn.Module):
             # print([(isEnglish(' '.join(sent)), sent) for sent in decoded_sents])
             # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
             # print('==================')
+        '''
         # Concatenate the two arguments with a separator tag
         new_batch = input_txt_to_batch(decoded_sents, self.lang)
         separator_sent = ['[SEP]'] * new_batch.shape[0]
@@ -416,15 +430,30 @@ class PointerAttnSeqToSeq(nn.Module):
         padded_batch[:, :max_len] = new_batch
         padded_batch = padded_batch.to('cuda:1')
         # Prevents the libcublas error?
+        '''
+        
+        sents = [pred + ' [SEP] ' + target for pred, target in zip(decoded_sents, batch['target_txt'])]
+        batch = self.bert_tokenizer(sents, return_tensors='pt', padding=True)['input_ids']
+        
+        # min_out, min_inds = torch.min(batch, dim=1)
+        # max_out, max_inds = torch.max(batch, dim=1)
+        # print(f'min: {min_out}, max: {max_out}')
+        # print(sensation_model)
+        if USE_CUDA:
+            batch = batch.to('cuda:1')
+
+        
 
         try:
-            rewards = sensation_model(padded_batch)
+            rewards = sensation_model(batch)
         except RuntimeError:
             print('Runtime Error!')
             print(f'decoded: {decoded_sents}')
             print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
-            print(f'new_batch: {new_batch.shape}, padded_batch: {padded_batch.shape}')
-            print([isEnglish(' '.join(sent)) for sent in decoded_sents])
+            # print(f'new_batch: {new_batch.shape}, padded_batch: {padded_batch.shape}')
+            # print(f'batch: {batch}')
+            # print([isEnglish(' '.join(sent)) for sent in decoded_sents])
+            
             raise RuntimeError
 
         rewards = rewards.to('cuda:0')
@@ -441,14 +470,68 @@ class PointerAttnSeqToSeq(nn.Module):
 
         rewards = rewards.detach()
         return rewards, 0.0
+
+    def init_batch(self, batch, individual_tokenization=False):
+        texts = batch['input_txt']
+        target_texts = batch['target_txt']
+
+        inputs, targets, batch_size = None, None, 0
+        if individual_tokenization:
+            inputs = [self.tokenizer(text, return_tensors="pt") for text in texts]
+            targets = [self.tokenizer(target, return_tensors="pt") for target in target_texts]
+
+            if USE_CUDA:
+                inputs = [{key: item.to('cuda:0') for key, item in inp.items()} for inp in inputs]
+                inputs = [{key: item.to('cuda:0') for key, item in target.items()} for target in targets]
+
+            batch_size = len(inputs)
+        else:
+            self.tokenizer.padding_side = "left"
+            inputs = self.tokenizer(texts, return_tensors="pt", padding=True)
+
+            self.tokenizer.padding_side = "right"
+            targets = self.tokenizer(target_texts, return_tensors="pt", padding=True)
+
+            if USE_CUDA:
+                inputs = {key: item.to('cuda:0') for key, item in inputs.items()}
+                targets = {key: item.to('cuda:0') for key, item in targets.items()}
+
+            batch_size = inputs['input_ids'].shape[0]
+
+
+
+        # padding should stay on the right for targets
+        # this ensures it doesn't interfere with teacher forcing
+        
+       
+        
+        return inputs, targets, batch_size
+
+    def run_decoder(self, inputs):
+        attention_mask = inputs['attention_mask']
+        outputs = self.decoder.generate(**inputs, num_beams=5, max_length=inputs['input_ids'].shape[-1] + 1, return_dict_in_generate=True, output_scores=True)
+        input_ids = outputs['sequences']
+
+        # checks if last generated token is EOS, and if so, accordingly updates attention mask
+        generated_attention_mask = torch.logical_not((inputs['input_ids'][:, -1].clone().detach() == self.tokenizer.eos_token_id)).long().view(-1, 1)
+        attention_mask = torch.cat((attention_mask, generated_attention_mask), dim=1)
+        inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
+
+        final_dist = outputs['scores'][0][::5]
+        
+        return inputs, outputs, final_dist
  
     def sample_batch(self, batch):
-        enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        
         # remove this
-        encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
-        s_t_1 = self.reduce_state(encoder_hidden)
+        # encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
+        # s_t_1 = self.reduce_state(encoder_hidden)
 
-        batch_size = enc_batch.size(0)
+        # batch_size = enc_batch.size(0)
+
+        inputs, _, batch_size = self.init_batch(batch)
+
         step_losses = []
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
@@ -459,10 +542,13 @@ class PointerAttnSeqToSeq(nn.Module):
             step_mask = step_mask.to("cuda:0")
         all_ext_vocab_targets = []
         for di in range(self.args["max_r"]):
-            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
-                                                        encoder_outputs, enc_padding_mask, c_t_1,
-                                                        extra_zeros, enc_batch_extend_vocab,
-                                                                    coverage, di, training=True)
+            # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
+            #                                             encoder_outputs, enc_padding_mask, c_t_1,
+            #                                             extra_zeros, enc_batch_extend_vocab,
+            #                                                         coverage, di, training=True)
+            inputs, outputs, final_dist = self.run_decoder(inputs)
+            
+
             ext_vocab_target = torch.multinomial(final_dist.data, 1).long().squeeze() # sampling
             all_ext_vocab_targets.append(ext_vocab_target.detach())
 
@@ -507,12 +593,13 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_rl_loss(self, batch, sensation_model, use_s_score):
 
-        enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
 
-        encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
-        s_t_1 = self.reduce_state(encoder_hidden)
+        # encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
+        # s_t_1 = self.reduce_state(encoder_hidden)
 
-        batch_size = enc_batch.size(0)
+        # batch_size = enc_batch.size(0)
+        inputs, _, batch_size = self.init_batch(batch)
         step_losses = []
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
@@ -525,12 +612,17 @@ class PointerAttnSeqToSeq(nn.Module):
         all_output1 = []
         # in len of maximum size of headlines
         for di in range(self.args["max_r"]):
-            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
-                                                        encoder_outputs, enc_padding_mask, c_t_1,
-                                                        extra_zeros, enc_batch_extend_vocab,
-                                                                    coverage, di, training=True)
+            # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
+            #                                             encoder_outputs, enc_padding_mask, c_t_1,
+            #                                             extra_zeros, enc_batch_extend_vocab,
+            #                                                         coverage, di, training=True)
+
+            inputs, outputs, final_dist = self.run_decoder(inputs)
+
             target = torch.multinomial(final_dist.data, 1).long().squeeze() # sampling
             all_targets.append(target.detach())
+            # TODO: how to get output1, just use hidden states? that is shape (batch, seq_len, hidden_dim)
+            output1 = outputs['hidden_states'][0][0][::5, -1 ,:]
             # this is some hidden state (batch * hidden_dim) -> o_t
             all_output1.append(output1)
             # TODO:why are the gold probs coming from the decoder? seems to be misnamed
@@ -583,13 +675,15 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_loss(self, batch, use_s_score=False, return_full_loss=False):
         # calculates MLE loss
-        enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        # seems like target and dec batches are the same
         dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch = self.get_output_from_batch(batch)
 
-        encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
-        s_t_1 = self.reduce_state(encoder_hidden)
+        # encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
+        # s_t_1 = self.reduce_state(encoder_hidden)
 
-        batch_size = enc_batch.size(0)
+        # batch_size = enc_batch.size(0)
+        inputs, targets, batch_size = self.init_batch(batch)
         step_losses = []
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
@@ -597,10 +691,12 @@ class PointerAttnSeqToSeq(nn.Module):
             y_t_1 = y_t_1.to("cuda:0")
 
         for di in range(min(max_dec_len, self.args["max_r"])):
-            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
-                                                        encoder_outputs, enc_padding_mask, c_t_1,
-                                                        extra_zeros, enc_batch_extend_vocab,
-                                                                    coverage, di, training=True)
+            # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
+            #                                             encoder_outputs, enc_padding_mask, c_t_1,
+            #                                             extra_zeros, enc_batch_extend_vocab,
+            #                                                         coverage, di, training=True)
+            inputs, outputs, final_dist = self.run_decoder(inputs)
+
             target = target_batch[:, di]
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + self.args["eps"])
@@ -610,8 +706,11 @@ class PointerAttnSeqToSeq(nn.Module):
             step_mask = dec_padding_mask[:, di]
             step_loss = step_loss * step_mask
             step_losses.append(step_loss)
+            # TODO: how to do teacher forcing here? I could try setting hidden state
+            #       but once again, the shapes differ
             # TODO: forces to be teacher's answer and calculates loss based students? what is the teacher and why is this not performing
-            y_t_1 = dec_batch[:, di]  # Teacher forcing
+            # y_t_1 = dec_batch[:, di]  # Teacher forcing
+            inputs['input_ids'][:, -1] = targets['input_ids'][:, di] # Teacher forcing
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
         if use_s_score:
@@ -627,13 +726,14 @@ class PointerAttnSeqToSeq(nn.Module):
 
     def get_prob(self, batch):
 
-        enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
+        # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
         dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch = self.get_output_from_batch(batch)
 
-        encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
-        s_t_1 = self.reduce_state(encoder_hidden)
+        # encoder_outputs, encoder_hidden = self.encoder(enc_batch, enc_lens)
+        # s_t_1 = self.reduce_state(encoder_hidden)
 
-        batch_size = enc_batch.size(0)
+        # batch_size = enc_batch.size(0)
+        inputs, targets, batch_size = self.init_batch(batch)
         step_losses = []
 
         y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
@@ -641,10 +741,12 @@ class PointerAttnSeqToSeq(nn.Module):
             y_t_1 = y_t_1.to("cuda:0")
 
         for di in range(min(max_dec_len, self.args["max_r"])):
-            final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
-                                                        encoder_outputs, enc_padding_mask, c_t_1,
-                                                        extra_zeros, enc_batch_extend_vocab,
-                                                                    coverage, di, training=True)
+            # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
+            #                                             encoder_outputs, enc_padding_mask, c_t_1,
+            #                                             extra_zeros, enc_batch_extend_vocab,
+            #                                                         coverage, di, training=True)
+            inputs, outputs, final_dist = self.run_decoder(inputs)
+
             target = target_batch[:, di]
 
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
@@ -652,7 +754,9 @@ class PointerAttnSeqToSeq(nn.Module):
             step_mask = dec_padding_mask[:, di]
             step_loss = step_loss * step_mask
             step_losses.append(step_loss)
-            y_t_1 = dec_batch[:, di]  # Teacher forcing
+            # y_t_1 = dec_batch[:, di]  # Teacher forcing
+            inputs['input_ids'][:, -1] = targets['input_ids'][:, di] # Teacher forcing
+
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
         batch_avg_loss = sum_losses/dec_lens_var.float()
@@ -713,8 +817,15 @@ class PointerAttnSeqToSeq(nn.Module):
         self.decoder.train(False)
 
         assert decode_type == "beam"
-        beam_sh = BeamSearch(self, self.args, self.lang)
-        decoded_sents = beam_sh.beam_search(batch)
+        inputs, _, _ = self.init_batch(batch, individual_tokenization=True)
+        if USE_CUDA:
+            inputs = [{key: item.to('cuda:0') for key, item in inp.items()} for inp in inputs]
+
+        outputs = [self.decoder.generate(**inp, num_beams=5, max_length=256) for inp in inputs]
+        # print(outputs[0], type(outputs[0]))
+        decoded_sents = [self.tokenizer.decode(output[0]) for output in outputs]
+        # beam_sh = BeamSearch(self, self.args, self.lang)
+        # decoded_sents = beam_sh.beam_search(batch)
 
         self.encoder.train(True)
         self.decoder.train(True)

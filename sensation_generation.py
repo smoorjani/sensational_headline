@@ -295,7 +295,7 @@ class Trainer(object):
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
-                #print(batch)
+                # print(batch)
                 #print('Decoding: ')
                 #====
                 # decoded_sents = self.model.decode_batch(batch,"beam")
@@ -320,7 +320,7 @@ class Trainer(object):
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
                     old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
                     decoded_sents = self.model.decode_batch(batch,"beam")
-                    print('Decoded:', decoded_sents)
+                    print(f'Original: {batch["input_txt"]}\n Decoded: {decoded_sents}')
                     sensation_rewards = self.model.get_sensation_reward(decoded_sents, batch, self.sensation_model)
                     rewards = self.model.get_reward(decoded_sents, batch, self.sensation_model)[0]
                     for i,(prediction, ground_truth, old_pred) in enumerate(zip(hyp, ref, old_hyp)):
@@ -359,6 +359,8 @@ class Trainer(object):
                 self.train_step(batch, step, j==0)
                 logging.info(self.print_loss(step))
                 step += 1
+
+                torch.cuda.empty_cache()
 
 
     def save_decode_sents(self, data, save_file):
