@@ -17,7 +17,10 @@ torch.manual_seed(123)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(123)
 
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, BartTokenizer, BartConfig, BartForCausalLM
+from transformers.generation_logits_process import LogitsProcessorList
+import gc
+
 
 def isEnglish(s):
     try:
@@ -289,12 +292,20 @@ class PointerAttnSeqToSeq(nn.Module):
         else:
             raise ValueError("not implemented")
         
-        config = GPT2Config.from_pretrained("gpt2", output_hidden_states=True, output_attentions=True)
-        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        print('Loading gpt model...')
+        # config = GPT2Config.from_pretrained("gpt2", output_hidden_states=True, output_attentions=True)
+        # self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        # self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        # self.tokenizer.pad_token = self.tokenizer.eos_token
+        # config.pad_token_id = config.eos_token_id
+        # self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
+
+        config = BartConfig.from_pretrained("facebook/bart-base", output_hidden_states=True, output_attentions=True)
+        self.tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
         self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         self.tokenizer.pad_token = self.tokenizer.eos_token
         config.pad_token_id = config.eos_token_id
-        self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
+        self.decoder = BartForCausalLM.from_pretrained("facebook/bart-base", config=config)
 
         # if self.args["decoder_type"] == "pointer_attn":
         #     self.decoder = PointerAttnDecoder(self.args, self.embedding)
@@ -308,6 +319,7 @@ class PointerAttnSeqToSeq(nn.Module):
             self.decoder = self.decoder.to("cuda:0")
             self.embedding = self.embedding.to("cuda:0")
             self.reduce_state = self.reduce_state.to("cuda:0")
+        print(f'gpt model on {self.decoder.device}')
 
     def get_encode_states(self, batch):
         # NEVER USED
@@ -370,24 +382,12 @@ class PointerAttnSeqToSeq(nn.Module):
 
         return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
 
-    def decoded_batch_to_txt(self, all_targets, batch):
+    def decoded_batch_to_txt(self, all_targets):
 
         batch_size = all_targets[0].size(0)
         hyp = []
         for i in range(batch_size):
-            sent = []
-            art_oovs = batch["article_oovs"][i]
-            len_oovs = len(art_oovs)
-            for t in all_targets:
-                if int(t[i]) == EOS_idx:
-                    break
-                if int(t[i]) < self.vocab_size:
-                    sent.append(self.lang.idx2word[int(t[i])])
-                elif int(t[i]) < self.vocab_size + len_oovs:
-                    sent.append(art_oovs[int(t[i]) - self.vocab_size])
-                else:
-                    raise ValueError("invalid key generated")
-            hyp.append(sent)
+            hyp.append([self.tokenizer.decode(t[i]) for t in all_targets])
         return hyp
 
     def compute_rouge_reward(self, sent, input_txt, target_txt):
@@ -405,10 +405,10 @@ class PointerAttnSeqToSeq(nn.Module):
         '''
         #print(f'decoded: {decoded_sents}')
         # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
-        if not np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])):
-            for i, sent in enumerate(decoded_sents):
-                new_sent = [word if isEnglish(word) else '' for word in sent]
-                decoded_sents[i] = new_sent
+        # if not np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])):
+        #     for i, sent in enumerate(decoded_sents):
+        #         new_sent = [word if isEnglish(word) else '' for word in sent]
+        #         decoded_sents[i] = new_sent
                     
             # print([(isEnglish(' '.join(sent)), sent) for sent in decoded_sents])
             # print('Is everything in english?: ', np.bitwise_and.reduce(np.array([isEnglish(' '.join(sent)) for sent in decoded_sents])))
@@ -431,8 +431,9 @@ class PointerAttnSeqToSeq(nn.Module):
         padded_batch = padded_batch.to('cuda:1')
         # Prevents the libcublas error?
         '''
-        
-        sents = [pred + ' [SEP] ' + target for pred, target in zip(decoded_sents, batch['target_txt'])]
+
+        joined_decoded_sents = [' '.join(sent) for sent in decoded_sents]
+        sents = [pred + ' [SEP] ' + target for pred, target in zip(joined_decoded_sents, batch['target_txt'])]
         batch = self.bert_tokenizer(sents, return_tensors='pt', padding=True)['input_ids']
         
         # min_out, min_inds = torch.min(batch, dim=1)
@@ -441,8 +442,6 @@ class PointerAttnSeqToSeq(nn.Module):
         # print(sensation_model)
         if USE_CUDA:
             batch = batch.to('cuda:1')
-
-        
 
         try:
             rewards = sensation_model(batch)
@@ -498,30 +497,61 @@ class PointerAttnSeqToSeq(nn.Module):
 
             batch_size = inputs['input_ids'].shape[0]
 
-
-
         # padding should stay on the right for targets
         # this ensures it doesn't interfere with teacher forcing
-        
-       
-        
+
         return inputs, targets, batch_size
 
     def run_decoder(self, inputs):
+        print(inputs)
         attention_mask = inputs['attention_mask']
-        outputs = self.decoder.generate(**inputs, num_beams=5, max_length=inputs['input_ids'].shape[-1] + 1, return_dict_in_generate=True, output_scores=True)
-        input_ids = outputs['sequences']
+        # outputs = self.decoder.generate(**inputs, num_beams=5, max_length=inputs['input_ids'].shape[-1] + 1, return_dict_in_generate=True, output_scores=True)
+        print('calling outputs')
+        total_memory = 0
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    # print(type(obj), obj.size())
+
+                    acc = 4
+                    for dim in obj.size():
+                        acc *= dim
+
+                    total_memory += acc
+
+            except:
+                pass
+        print(f'Storage requirements: {total_memory}')
+        outputs = self.decoder(**inputs)
+        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
+
+        # get next token
+        final_dist = outputs.logits[:, -1, :]
+        logits_processor = LogitsProcessorList()
+        next_tokens_scores = logits_processor(inputs['input_ids'], final_dist)
+        next_tokens = torch.argmax(next_tokens_scores, dim=-1)
+        
+        # appending next tokens to input_ids
+        input_ids = torch.cat((inputs['input_ids'], next_tokens.unsqueeze(0).t()), dim=1)
 
         # checks if last generated token is EOS, and if so, accordingly updates attention mask
         generated_attention_mask = torch.logical_not((inputs['input_ids'][:, -1].clone().detach() == self.tokenizer.eos_token_id)).long().view(-1, 1)
         attention_mask = torch.cat((attention_mask, generated_attention_mask), dim=1)
-        inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
-
-        final_dist = outputs['scores'][0][::5]
         
+        inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
+        
+        # del generated_attention_mask
+        # del logits_processor
+        # del next_tokens_scores
+        # del next_tokens
+        # gc.collect()
+        # print(torch.cuda.memory_summary())
+
         return inputs, outputs, final_dist
  
     def sample_batch(self, batch):
+        # NOT CALLED IN OUR IMPLEMENTATION
+
         # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
         
         # remove this
@@ -534,11 +564,11 @@ class PointerAttnSeqToSeq(nn.Module):
 
         step_losses = []
 
-        y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
+        # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            y_t_1 = y_t_1.to("cuda:0")
+            # y_t_1 = y_t_1.to("cuda:0")
             step_mask = step_mask.to("cuda:0")
         all_ext_vocab_targets = []
         for di in range(self.args["max_r"]):
@@ -546,23 +576,23 @@ class PointerAttnSeqToSeq(nn.Module):
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
-            inputs, outputs, final_dist = self.run_decoder(inputs)
+            inputs, _, final_dist = self.run_decoder(inputs)
             
-
+            final_dist = final_dist.softmax(dim=1)
             ext_vocab_target = torch.multinomial(final_dist.data, 1).long().squeeze() # sampling
             all_ext_vocab_targets.append(ext_vocab_target.detach())
 
             all_step_mask.append(step_mask)
             step_mask = torch.clamp(step_mask - (ext_vocab_target == EOS_idx).float(), min=0.0)
 
-            y_t_1 = Variable(torch.ones(batch_size)).long()  # sampling
-            for i in range(batch_size):
-                if ext_vocab_target[i] >= self.vocab_size:
-                    y_t_1[i] = UNK_idx
-                else:
-                    y_t_1[i] = ext_vocab_target[i]
-            if USE_CUDA:
-                y_t_1 = y_t_1.to("cuda:0")
+            # y_t_1 = Variable(torch.ones(batch_size)).long()  # sampling
+            # for i in range(batch_size):
+            #     if ext_vocab_target[i] >= self.vocab_size:
+            #         y_t_1[i] = UNK_idx
+            #     else:
+            #         y_t_1[i] = ext_vocab_target[i]
+            # if USE_CUDA:
+            #     y_t_1 = y_t_1.to("cuda:0")
         ## pad ext_vocab_batch with pad_idx 
         seq_len = self.args["max_r"]
         y_t = Variable(torch.ones(batch_size, seq_len) * PAD_idx).long()
@@ -602,59 +632,69 @@ class PointerAttnSeqToSeq(nn.Module):
         inputs, _, batch_size = self.init_batch(batch)
         step_losses = []
 
-        y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
+        # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            y_t_1 = y_t_1.to("cuda:0")
+            # y_t_1 = y_t_1.to("cuda:0")
             step_mask = step_mask.to("cuda:0")
         all_targets = []
         all_output1 = []
+        
         # in len of maximum size of headlines
         for di in range(self.args["max_r"]):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
-
+            torch.cuda.empty_cache()
+            print(f'get_rl_loss loop {di}')
+            print('chkpt1\n', torch.cuda.memory_summary(), '\n')
             inputs, outputs, final_dist = self.run_decoder(inputs)
-
+            # do this to avoid negatives being fed into multinomial
+            final_dist = final_dist.softmax(dim=1)
+            # print('targets: ', torch.multinomial(final_dist.data, 1).long().squeeze())
             target = torch.multinomial(final_dist.data, 1).long().squeeze() # sampling
             all_targets.append(target.detach())
             # TODO: how to get output1, just use hidden states? that is shape (batch, seq_len, hidden_dim)
-            output1 = outputs['hidden_states'][0][0][::5, -1 ,:]
+            output1 = outputs['hidden_states'][-1][:, -1, :]
             # this is some hidden state (batch * hidden_dim) -> o_t
             all_output1.append(output1)
             # TODO:why are the gold probs coming from the decoder? seems to be misnamed
+            # gold_probs = final_dist[:, target]
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + self.args["eps"])
             
             step_loss = step_loss * step_mask
-
             all_step_mask.append(step_mask)
             step_losses.append(step_loss)
             step_mask = torch.clamp(step_mask - (target == EOS_idx).float(), min=0.0)
 
-            y_t_1 = Variable(torch.zeros(batch_size)).long()  # sampling
-            for i in range(batch_size):
-                if target[i] >= self.vocab_size:
-                    y_t_1[i] = UNK_idx
-                else:
-                    y_t_1[i] = target[i]
-            if USE_CUDA:
-                y_t_1 = y_t_1.to("cuda:0")
+            # print(all_step_mask[-1].size(), all_targets[-1].size(), all_output1[-1].size(), step_losses[-1].size())
+            # y_t_1 = Variable(torch.zeros(batch_size)).long()  # sampling
+            # for i in range(batch_size):
+            #     if target[i] >= self.vocab_size:
+            #         y_t_1[i] = UNK_idx
+            #     else:
+            #         y_t_1[i] = target[i]
+            # if USE_CUDA:
+            #     y_t_1 = y_t_1.to("cuda:0")
 
         # this is the linear layer that calculates \hat{R}_t
+        # print(all_output1, all_step_mask)
         baseline_rewards = [self.expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach() \
                                             for output1, step_mask in zip(all_output1, all_step_mask)]
         baseline_rewards = torch.cat(baseline_rewards, dim=1)
         all_step_mask = torch.stack(all_step_mask, dim=1).float()
         dec_lens_var = torch.sum(all_step_mask,dim=1)
-        decoded_sents = self.decoded_batch_to_txt(all_targets, batch)
+        decoded_sents = self.decoded_batch_to_txt(all_targets)
+        # print(decoded_sents, len(decoded_sents))
         total_reward, probs = self.get_reward(decoded_sents, batch, sensation_model)
         total_reward = total_reward.unsqueeze(1)
         
         # getting (R - \hat{R}_t)
+        # torch.Size([batch, 1]) torch.Size([batch, max_r])
+        # print(total_reward.shape, baseline_rewards.shape)
         reward =  total_reward.detach() - baseline_rewards.detach()
         sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
         # this is for ARL
@@ -686,17 +726,17 @@ class PointerAttnSeqToSeq(nn.Module):
         inputs, targets, batch_size = self.init_batch(batch)
         step_losses = []
 
-        y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
-        if USE_CUDA:
-            y_t_1 = y_t_1.to("cuda:0")
+        # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
+        # if USE_CUDA:
+        #     y_t_1 = y_t_1.to("cuda:0")
 
-        for di in range(min(max_dec_len, self.args["max_r"])):
+        for di in range(min(targets['input_ids'].shape[-1], self.args["max_r"])):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
-            inputs, outputs, final_dist = self.run_decoder(inputs)
-
+            inputs, _, final_dist = self.run_decoder(inputs)
+            # final_dist = Variable(final_dist, requires_grad=True).cuda()
             target = target_batch[:, di]
             gold_probs = torch.gather(final_dist, 1, target.unsqueeze(1)).squeeze()
             step_loss = -torch.log(gold_probs + self.args["eps"])
@@ -710,6 +750,8 @@ class PointerAttnSeqToSeq(nn.Module):
             #       but once again, the shapes differ
             # TODO: forces to be teacher's answer and calculates loss based students? what is the teacher and why is this not performing
             # y_t_1 = dec_batch[:, di]  # Teacher forcing
+            # print(inputs['input_ids'].shape, targets['input_ids'].shape, di)
+    
             inputs['input_ids'][:, -1] = targets['input_ids'][:, di] # Teacher forcing
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
@@ -736,16 +778,16 @@ class PointerAttnSeqToSeq(nn.Module):
         inputs, targets, batch_size = self.init_batch(batch)
         step_losses = []
 
-        y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
-        if USE_CUDA:
-            y_t_1 = y_t_1.to("cuda:0")
+        # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
+        # if USE_CUDA:
+        #     y_t_1 = y_t_1.to("cuda:0")
 
-        for di in range(min(max_dec_len, self.args["max_r"])):
+        for di in range(min(targets['input_ids'].shape[-1], self.args["max_r"])):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
-            inputs, outputs, final_dist = self.run_decoder(inputs)
+            inputs, _, final_dist = self.run_decoder(inputs)
 
             target = target_batch[:, di]
 
@@ -755,8 +797,8 @@ class PointerAttnSeqToSeq(nn.Module):
             step_loss = step_loss * step_mask
             step_losses.append(step_loss)
             # y_t_1 = dec_batch[:, di]  # Teacher forcing
+            # print(inputs['input_ids'].shape, targets['input_ids'].shape, di)
             inputs['input_ids'][:, -1] = targets['input_ids'][:, di] # Teacher forcing
-
 
         sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
         batch_avg_loss = sum_losses/dec_lens_var.float()

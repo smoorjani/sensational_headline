@@ -116,7 +116,7 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        args['batch_size'] = 8
+        # args['batch_size'] = 4
         # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         # lang = Lang(list(tokenizer.encoder.keys()))
         with open("vocab.txt", "r") as f:
@@ -166,6 +166,7 @@ class Trainer(object):
         # logging.info("load checkpoint from {}".format(args["sensation_scorer_path"]))
         # checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
         # self.sensation_model.load_state_dict(checkpoint['model'])
+        print('Loading sensation model...')
         self.sensation_model = PersuasivenessClassifier(self.lang)
         # sys.path.insert(0, '../persuasive_classifier/models')
         self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
@@ -246,6 +247,8 @@ class Trainer(object):
         else:
             _, loss, acc = self.model.get_loss(batch)
 
+        # loss = Variable(loss, requires_grad = True)
+        # loss.backward(create_graph = True)
         loss.backward()
 
         clip_grad_norm(self.model.parameters(), self.args["max_grad_norm"])
@@ -311,7 +314,7 @@ class Trainer(object):
                 else:
                     logging_step = 10
 
-                if j % logging_step == 0:
+                if j % logging_step == 0 and j:
                     # if self.args["use_rl"]:
                     #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
                     #     os.makedirs(save_folder, exist_ok=True)
@@ -335,7 +338,7 @@ class Trainer(object):
                         logging.info("input article: {}".format(batch["input_txt"][i]))
                         logging.info("decode type: {}, {}: {}".format(self.args["decode_type"], rouge_metric, rouge([prediction], [ground_truth])[rouge_metric]))
 
-                if step % int(self.args['eval_step']) == 0: 
+                if step % int(self.args['eval_step']) == 0 and j: 
                     dev_metric, _, (hyp, ref, rewards, sensation_scores, articles) = self.model.evaluate(self.dev, self.args["decode_type"], sensation_model=self.sensation_model, return_pred=True)
                     if(dev_metric > best_metric):
                         best_metric = dev_metric

@@ -27,7 +27,7 @@ class CNNParams(object):
         parser.add_argument('-batch_size', type=int, default=32, help="batch size")
         parser.add_argument('-emb_size', type=int, default=300, help="embedding size")
         parser.add_argument('-output_vocab_size', type=int, default=50000, help="output_vocab_size")
-        parser.add_argument('-hidden_size', type=int, default=500, help="hidden size")
+        parser.add_argument('-hidden_size', type=int, default=768, help="hidden size")
         parser.add_argument('-dropout', type=float, default=0.0, help="dropout rate")
         
         parser.add_argument('-decode_type', type=str, default="beam", help="decoding method for generation")
