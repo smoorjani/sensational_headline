@@ -1,6 +1,12 @@
 import argparse
 import logging
-from utils.global_variables import *
+USE_CUDA = True
+
+UNK_idx = 0
+PAD_idx = 1
+EOS_idx = 2
+SOS_idx = 3
+
 
 rouge_metric = "rouge_l/f_score"
 

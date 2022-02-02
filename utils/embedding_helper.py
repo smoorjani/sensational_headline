@@ -18,10 +18,8 @@ def get_embedding(emb_file, lang, key="word2id"):
         print(lang.n_words)
 
     emb_size = embedding.shape[1]
-    # new_embedding = np.zeros((100, emb_size))
     new_embedding = np.random.randn(lang.n_words, emb_size) * 0.01
     for i in range(lang.n_words):
-    # for i in range(100):
         if lang.idx2word[i] in word2id:
             new_embedding[i] = embedding[word2id[lang.idx2word[i]]]
 

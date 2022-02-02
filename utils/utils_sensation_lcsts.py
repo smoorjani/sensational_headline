@@ -2,7 +2,6 @@ import torch
 import torch.utils.data as data
 from torch.autograd import Variable
 from utils.config import *
-import pickle
 import logging
 from transformers import BertTokenizer
 
@@ -84,33 +83,10 @@ class Dataset(data.Dataset):
         return len(self.y_seq)
 
     def process_target(self, target_txt, oovs, tokenizer):
-        ## seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
-        # seq = []
-        # for word in target_txt.strip().split():
-        #     if word in self.word2idx:
-        #         seq.append(self.word2idx[word])
-        #     elif word in oovs:
-        #         seq.append(self.vocab_size + oovs.index(word))
-        #     else:
-        #         seq.append(UNK_idx)
-        # seq.append(EOS_idx)
-        # seq = torch.LongTensor(seq)
         seq = tokenizer(target_txt.strip() + " [EOS]")['input_ids']
         return torch.LongTensor(seq)
 
     def process_input(self, input_txt, tokenizer):
-        # seq = []
-        # oovs = []
-        # for word in input_txt.strip().split():
-        #     if word in self.word2idx:
-        #         seq.append(self.word2idx[word])
-        #     else:
-        #         if word not in oovs:
-        #             oovs.append(word)
-        #         seq.append(self.vocab_size + oovs.index(word))
-        
-        # seq = torch.LongTensor(seq)
-        # return seq, oovs
         seq = tokenizer(input_txt.strip())['input_ids']  
         return torch.LongTensor(seq), []
 
@@ -119,11 +95,8 @@ class Dataset(data.Dataset):
     def process(self, input_txt, target, tokenizer):
         
         if target:
-            # seq = [self.word2idx[word] if word in self.word2idx and self.word2idx[word] < self.output_vocab_size else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
-            # seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()] + [EOS_idx]
             seq = tokenizer(input_txt.strip() + " [EOS]")['input_ids']
         else:
-            # seq = [self.word2idx[word] if word in self.word2idx else UNK_idx for word in input_txt.strip().split()]
             seq = tokenizer(input_txt.strip())['input_ids']
         seq = torch.Tensor(seq)
         return seq

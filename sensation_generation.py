@@ -5,12 +5,11 @@ from utils.config import *
 from utils.utils_sensation_lcsts import *
 from torch.nn.utils import clip_grad_norm
 from seq2seq.sensation_get_to_the_point import *
-from seq2seq.sensation_scorer import SensationCNN, PersuasivenessClassifier
+from seq2seq.sensation_scorer import PersuasivenessClassifier
 import logging
 import copy
-import jieba
+from utils.rouge import rouge
 from utils.function import *
-import sys
 
 
 # from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
@@ -318,7 +317,6 @@ class Trainer(object):
                     # if self.args["use_rl"]:
                     #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
                     #     os.makedirs(save_folder, exist_ok=True)
-                    #     self.save_decode_sents(self.test, save_folder+"/prediction_step_{}.txt".format(step))
 
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
                     old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
@@ -330,9 +328,6 @@ class Trainer(object):
                         logging.info("prediction: {}".format(prediction))
                         logging.info("seq2seq prediction: {}".format(old_pred))
                         logging.info("prediction sensation score: {}, {}".format(sensation_rewards[i], rewards[i]))
-                        if self.args["use_rl"]:
-                            rouge_rewards = self.model.compute_rouge_reward(list(jieba.cut("".join(prediction.split()))), batch["input_txt"][i], batch["target_txt"][i])
-                            logging.info("rouge_r: {}, reward:{}".format(rouge_rewards, rewards[i]))
                         logging.info("ground truth: {}".format(ground_truth))
                         logging.info("ground sensation score: {}".format(batch["sensation_scores"][i]))
                         logging.info("input article: {}".format(batch["input_txt"][i]))
@@ -364,81 +359,6 @@ class Trainer(object):
                 step += 1
 
                 torch.cuda.empty_cache()
-
-
-    def save_decode_sents(self, data, save_file):
-
-        logging.info("start decoding")
-        hyp = []
-        ref = []
-        article = []
-        # pbar = tqdm(enumerate(dev), total=len(dev))
-        # for j, data_dev in pbar:
-        rewards = []
-        rouge_r = []
-        sensation_rewards = []
-        for j, data_dev in enumerate(data):
-
-            decoded_sents = self.model.decode_batch(data_dev, "beam")
-            if self.args["use_rl"]:
-                sensation_rewards.extend([r for r in self.model.get_sensation_reward(decoded_sents, data_dev, self.sensation_model)])
-                rewards.extend([ r for r in self.model.get_reward(decoded_sents, data_dev,
-                 self.sensation_model)[0] ])
-            for i, sent in enumerate(decoded_sents):
-                hyp.append(" ".join("".join(sent)))
-                ref.append(" ".join("".join(data_dev["target_txt"][i].split())))
-                article.append(data_dev["input_txt"][i])
-                if self.args["use_rl"]:
-                    rouge_r.append(self.model.compute_rouge_reward(sent, data_dev["input_txt"][i], data_dev["target_txt"][i]))
-
-        rouge_score = rouge(hyp, ref)
-        with open(save_file, "w") as f:
-            if self.args["use_rl"]:
-                f.write("\n".join(["{}\nrouge_r: {},sensation_reward:{}, reward:{}\n{}\n{}\n".format(h,r_r,l_r,r,g,a) for h,g,r_r,l_r,r,a in zip(hyp, ref, rouge_r,sensation_rewards, rewards, article)]))
-            else:
-                f.write("\n".join([h+"\n"+g+"\n" for h,g in zip(hyp, ref)]))
-            f.write("\n" + str(rouge_score) + "\n")
-            f.write("rewards: " + str(sum(rewards) / len(rewards)) + "\n")
-
-    def decoding(self, decode_type="beam"):
-        # Configure models
-
-        if self.args["use_rl"]  and self.args["rl_model_path"] is None:
-            raise ValueError("use rl but path is not given")
-
-        if self.args["use_rl"] is None and self.args["rl_model_path"] is not None:
-            raise ValueError("not using rl but give rl_model_path")
-
-        if self.args["rl_model_path"] is not None:
-            self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
-            if USE_CUDA:
-                self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
-            self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
-            step, _ = self.load_rl_model()
-            save_file = self.args["rl_model_path"] + "/prediction.txt"
-        elif self.args["path"] is not None:
-            step, _ = self.load_base_model()
-            if self.args["use_rl"]:
-                self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
-                if USE_CUDA:
-                    self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
-                self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
-            save_file = self.args["path"] + "/prediction.txt"
-        else:
-            pass
-
-        _, _, (hyp, ref, rewards, sensation_scores, articles) = self.model.evaluate(self.test, self.args["decode_type"], sensation_model=self.sensation_model, return_pred=True)
-        if self.args["rl_model_path"] is not None:
-            directory = self.args["rl_model_path"]
-            with open(directory + "/test_prediction", "w") as f:
-                f.write("\n".join(["{}\t{:.5f}\n{}\t{:.5f}\n{}\n".format(h,r,g,s,a) for h,g,r,s,a in zip(hyp, ref, rewards, sensation_scores, articles)]))
-                f.write("\n{}\n".format(str(rouge(hyp, ref))))
-                
-        elif self.args["path"] is not None:
-            directory = self.args["path"]
-            with open(directory + "/test_prediction", "w") as f:
-                f.write("\n".join(["{}\t{:.5f}\n{}\t{:.5f}\n{}\n".format(h,r,g,s,a) for h,g,r,s,a in zip(hyp, ref, rewards, sensation_scores, articles)]))
-                f.write("\n{}\n".format(str(rouge(hyp, ref))))
 
 if __name__ == "__main__":
     trainer =  Trainer()

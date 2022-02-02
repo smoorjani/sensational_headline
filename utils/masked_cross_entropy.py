@@ -10,12 +10,12 @@ def sequence_mask(sequence_length, max_len=None):
     seq_range = torch.arange(0, max_len).long()
     seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
     seq_range_expand = Variable(seq_range_expand)
-    # print(f'seq_range_expand: {seq_range_expand}, {seq_range_expand.shape}')
+
     if sequence_length.is_cuda:
         seq_range_expand = seq_range_expand.to("cuda:0")
     seq_length_expand = (sequence_length.unsqueeze(1)
                          .expand_as(seq_range_expand))
-    # print(f'seq_len_expand: {seq_length_expand}, {seq_length_expand.shape}')
+                         
     return seq_range_expand < seq_length_expand
 
 
