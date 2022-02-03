@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional
 from torch.autograd import Variable
-from utils.config import *
+from sutils.config import *
 
 def sequence_mask(sequence_length, max_len=None):
     if max_len is None:
@@ -12,7 +12,7 @@ def sequence_mask(sequence_length, max_len=None):
     seq_range_expand = Variable(seq_range_expand)
     # print(f'seq_range_expand: {seq_range_expand}, {seq_range_expand.shape}')
     if sequence_length.is_cuda:
-        seq_range_expand = seq_range_expand.to("cuda:0")
+        seq_range_expand = seq_range_expand.cuda()
     seq_length_expand = (sequence_length.unsqueeze(1)
                          .expand_as(seq_range_expand))
     # print(f'seq_len_expand: {seq_length_expand}, {seq_length_expand.shape}')
@@ -54,7 +54,7 @@ def masked_cross_entropy(logits, target, length):
 def accuracy(logits, target, length):
 
     if USE_CUDA:
-        length = Variable(torch.LongTensor(length)).to("cuda:0")
+        length = Variable(torch.LongTensor(length)).cuda()
     else:
         length = Variable(torch.LongTensor(length))    
 

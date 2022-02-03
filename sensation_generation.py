@@ -1,16 +1,19 @@
 import numpy as np
 import logging
 from tqdm import tqdm
-from utils.config import *
-from utils.utils_sensation_lcsts import *
+from sutils.config import *
+from sutils.utils_sensation_lcsts import *
 from torch.nn.utils import clip_grad_norm
 from seq2seq.sensation_get_to_the_point import *
 from seq2seq.sensation_scorer import SensationCNN, PersuasivenessClassifier
 import logging
 import copy
 import jieba
-from utils.function import *
+from sutils.function import *
 import sys
+
+import deepspeed
+from transformers.deepspeed import HfDeepSpeedConfig
 
 
 # from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
@@ -149,7 +152,7 @@ class Trainer(object):
         model = PointerAttnSeqToSeq(self.args, lang)
         self.model = model
         if USE_CUDA:
-            self.model = self.model.to("cuda:0")
+            self.model = self.model.cuda()
             print('Gen model is on: ', next(self.model.parameters()).device)
 
         logging.info(model)
@@ -172,7 +175,8 @@ class Trainer(object):
         self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
         self.sensation_model.bert.resize_token_embeddings(len(vocab))
         if USE_CUDA:
-            self.sensation_model.to('cuda:1')
+            # self.sensation_model.to('cuda:1')
+            self.sensation_model.cuda()
             print('Sensation model is on: ', next(self.sensation_model.parameters()).device)
 
         if self.args['optimizer'] == "adam":
@@ -181,6 +185,10 @@ class Trainer(object):
             self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.args['lr'])
         else:
             raise ValueError("optimizer not implemented")
+
+        ds_config = './ds_config.json'
+        dschf = HfDeepSpeedConfig(ds_config)
+        self.engine = deepspeed.initialize(model=self.model, config_params=ds_config, optimizer=self.optimizer)
 
     def save_model(self, save_name, best_result, step):
         directory = "sensation_save/" + save_name + "/"
@@ -281,7 +289,7 @@ class Trainer(object):
         if self.args["rl_model_path"] is not None:
             self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
             if USE_CUDA:
-                self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
+                self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
             self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             step, best_metric = self.load_rl_model()
         elif self.args["path"] is not None:
@@ -290,7 +298,7 @@ class Trainer(object):
                 best_metric = 0.0
                 self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
                 if USE_CUDA:
-                    self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
+                    self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
                 self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
         else:
             pass
@@ -412,7 +420,7 @@ class Trainer(object):
         if self.args["rl_model_path"] is not None:
             self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
             if USE_CUDA:
-                self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
+                self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
             self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             step, _ = self.load_rl_model()
             save_file = self.args["rl_model_path"] + "/prediction.txt"
@@ -421,7 +429,7 @@ class Trainer(object):
             if self.args["use_rl"]:
                 self.model.expected_reward_layer = torch.nn.Linear(self.args["hidden_size"], 1)
                 if USE_CUDA:
-                    self.model.expected_reward_layer = self.model.expected_reward_layer.to("cuda:0")
+                    self.model.expected_reward_layer = self.model.expected_reward_layer.cuda()
                 self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
             save_file = self.args["path"] + "/prediction.txt"
         else:

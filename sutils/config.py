@@ -1,6 +1,6 @@
 import argparse
 import logging
-from utils.global_variables import *
+from sutils.global_variables import *
 
 rouge_metric = "rouge_l/f_score"
 
@@ -94,6 +94,8 @@ class NNParams(object):
         parser.add_argument('-model_type', type=str, default=None, help="model type")
         parser.add_argument('-emb_file', type=dict, default=None)
         parser.add_argument('-use_pretrained_emb', type=bool, default=False)
+
+        parser.add_argument("--local_rank", type=int, default=0)
 
         self.args = vars(parser.parse_args())
         assert self.args["use_s_score"] is not None

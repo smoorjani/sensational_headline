@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from utils.sensation_config import *
+from sutils.sensation_config import *
 import numpy as np
 from transformers import BertModel
 
@@ -55,9 +55,9 @@ class SensationCNN(nn.Module):
         self.out = nn.Linear(num_filters * len(filter_sizes), 1)
 
         if USE_CUDA:
-            self.embedding = self.embedding.to("cuda:0")
-            self.convs_q = self.convs_q.to("cuda:0")
-            self.out = self.out.to("cuda:0")
+            self.embedding = self.embedding.cuda()
+            self.convs_q = self.convs_q.cuda()
+            self.out = self.out.cuda()
 
 
     def forward(self, input_batch):

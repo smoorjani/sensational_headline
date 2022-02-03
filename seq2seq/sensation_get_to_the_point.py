@@ -6,19 +6,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from numpy import random
-from utils.masked_cross_entropy import sequence_mask
-from utils.beam_for_pointer_attn import *
-from utils.config import  *
-from utils.utils_sensation import input_txt_to_batch
+from sutils.masked_cross_entropy import sequence_mask
+from sutils.beam_for_pointer_attn import *
+from sutils.config import  *
+from sutils.utils_sensation import input_txt_to_batch
 import numpy as np
-from utils.embedding_helper import get_embedding
+from sutils.embedding_helper import get_embedding
 random.seed(123)
 torch.manual_seed(123)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(123)
 
 from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, BartTokenizer, BartConfig, BartForCausalLM
+import deepspeed
 from transformers.generation_logits_process import LogitsProcessorList
+from transformers.deepspeed import HfDeepSpeedConfig
 import gc
 
 
@@ -76,8 +78,8 @@ class BiLSTMEncoder(nn.Module):
         h0_encoder = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
         c0_encoder = Variable(torch.zeros(self.n_layers, batch_size, self.hidden_size))
         if USE_CUDA:
-            h0_encoder = h0_encoder.to("cuda:0")
-            c0_encoder = c0_encoder.to("cuda:0")
+            h0_encoder = h0_encoder.cuda()
+            c0_encoder = c0_encoder.cuda()
         return h0_encoder, c0_encoder
 
     #seq_lens should be in descending order
@@ -99,7 +101,7 @@ class BiLSTMEncoder(nn.Module):
                     if enc_input[i, j] == UNK_idx:
                         unk_emb = Variable(torch.zeros(2 * self.hidden_size))
                         if USE_CUDA:
-                            unk_emb = unk_emb.to("cuda:0")
+                            unk_emb = unk_emb.cuda()
                         if j > 0:
                             unk_emb[:self.hidden_size] = h[i, j - 1, :self.hidden_size]
                         if j < seq_lens[i] - 1:
@@ -293,19 +295,20 @@ class PointerAttnSeqToSeq(nn.Module):
             raise ValueError("not implemented")
         
         print('Loading gpt model...')
-        # config = GPT2Config.from_pretrained("gpt2", output_hidden_states=True, output_attentions=True)
-        # self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-        # self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        # self.tokenizer.pad_token = self.tokenizer.eos_token
-        # config.pad_token_id = config.eos_token_id
-        # self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
-
-        config = BartConfig.from_pretrained("facebook/bart-base", output_hidden_states=True, output_attentions=True)
-        self.tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        config = GPT2Config.from_pretrained("gpt2", output_hidden_states=True, output_attentions=True)
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         self.tokenizer.pad_token = self.tokenizer.eos_token
         config.pad_token_id = config.eos_token_id
-        self.decoder = BartForCausalLM.from_pretrained("facebook/bart-base", config=config)
+        self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
+        
+
+        # config = BartConfig.from_pretrained("facebook/bart-base", output_hidden_states=True, output_attentions=True)
+        # self.tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+        # self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        # self.tokenizer.pad_token = self.tokenizer.eos_token
+        # config.pad_token_id = config.eos_token_id
+        # self.decoder = BartForCausalLM.from_pretrained("facebook/bart-base", config=config)
 
         # if self.args["decoder_type"] == "pointer_attn":
         #     self.decoder = PointerAttnDecoder(self.args, self.embedding)
@@ -315,10 +318,10 @@ class PointerAttnSeqToSeq(nn.Module):
         self.reduce_state = ReduceState(self.args)
 
         if USE_CUDA:
-            self.encoder = self.encoder.to("cuda:0")
-            self.decoder = self.decoder.to("cuda:0")
-            self.embedding = self.embedding.to("cuda:0")
-            self.reduce_state = self.reduce_state.to("cuda:0")
+            self.encoder = self.encoder.cuda()
+            self.decoder = self.decoder.cuda()
+            self.embedding = self.embedding.cuda()
+            self.reduce_state = self.reduce_state.cuda()
         print(f'gpt model on {self.decoder.device}')
 
     def get_encode_states(self, batch):
@@ -359,13 +362,13 @@ class PointerAttnSeqToSeq(nn.Module):
 
         if USE_CUDA:
             if enc_batch_extend_vocab is not None:
-                    enc_batch_extend_vocab = enc_batch_extend_vocab.to("cuda:0")
+                    enc_batch_extend_vocab = enc_batch_extend_vocab.cuda()
             if extra_zeros is not None:
-                extra_zeros = extra_zeros.to("cuda:0")
-            c_t_1 = c_t_1.to("cuda:0")
+                extra_zeros = extra_zeros.cuda()
+            c_t_1 = c_t_1.cuda()
 
             if coverage is not None:
-                coverage = coverage.to("cuda:0")
+                coverage = coverage.cuda()
 
         return enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage
 
@@ -420,7 +423,7 @@ class PointerAttnSeqToSeq(nn.Module):
         separator = [self.lang.word2idx[w] if w in self.lang.word2idx else UNK_idx for w in separator_sent]
         separator = Variable(torch.LongTensor(separator)).unsqueeze(1)
         if USE_CUDA:
-            separator = separator.to("cuda:0")
+            separator = separator.cuda()
         # print(f"Shape of arguments: {new_batch.shape}, {separator.shape}, {batch['target_batch'].t().shape}")
         new_batch = torch.cat((new_batch, separator, batch['target_batch'].t()), 1)
 
@@ -441,7 +444,8 @@ class PointerAttnSeqToSeq(nn.Module):
         # print(f'min: {min_out}, max: {max_out}')
         # print(sensation_model)
         if USE_CUDA:
-            batch = batch.to('cuda:1')
+            # batch = batch.to('cuda:1')
+            batch = batch.cuda()
 
         try:
             rewards = sensation_model(batch)
@@ -455,10 +459,11 @@ class PointerAttnSeqToSeq(nn.Module):
             
             raise RuntimeError
 
-        rewards = rewards.to('cuda:0')
+        # rewards = rewards.cuda()
+        rewards = rewards.cuda()
         w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list) if len(word_list) else 1 for word_list in decoded_sents])
         if USE_CUDA:
-            w = w.to("cuda:0")
+            w = w.cuda()
 
         return rewards * w
    
@@ -480,8 +485,8 @@ class PointerAttnSeqToSeq(nn.Module):
             targets = [self.tokenizer(target, return_tensors="pt") for target in target_texts]
 
             if USE_CUDA:
-                inputs = [{key: item.to('cuda:0') for key, item in inp.items()} for inp in inputs]
-                inputs = [{key: item.to('cuda:0') for key, item in target.items()} for target in targets]
+                inputs = [{key: item.cuda() for key, item in inp.items()} for inp in inputs]
+                inputs = [{key: item.cuda() for key, item in target.items()} for target in targets]
 
             batch_size = len(inputs)
         else:
@@ -492,8 +497,8 @@ class PointerAttnSeqToSeq(nn.Module):
             targets = self.tokenizer(target_texts, return_tensors="pt", padding=True)
 
             if USE_CUDA:
-                inputs = {key: item.to('cuda:0') for key, item in inputs.items()}
-                targets = {key: item.to('cuda:0') for key, item in targets.items()}
+                inputs = {key: item.cuda() for key, item in inputs.items()}
+                targets = {key: item.cuda() for key, item in targets.items()}
 
             batch_size = inputs['input_ids'].shape[0]
 
@@ -568,8 +573,8 @@ class PointerAttnSeqToSeq(nn.Module):
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            # y_t_1 = y_t_1.to("cuda:0")
-            step_mask = step_mask.to("cuda:0")
+            # y_t_1 = y_t_1.cuda()
+            step_mask = step_mask.cuda()
         all_ext_vocab_targets = []
         for di in range(self.args["max_r"]):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, output1 = self.decoder(y_t_1, s_t_1,
@@ -592,7 +597,7 @@ class PointerAttnSeqToSeq(nn.Module):
             #     else:
             #         y_t_1[i] = ext_vocab_target[i]
             # if USE_CUDA:
-            #     y_t_1 = y_t_1.to("cuda:0")
+            #     y_t_1 = y_t_1.cuda()
         ## pad ext_vocab_batch with pad_idx 
         seq_len = self.args["max_r"]
         y_t = Variable(torch.ones(batch_size, seq_len) * PAD_idx).long()
@@ -603,7 +608,7 @@ class PointerAttnSeqToSeq(nn.Module):
                     break
                 y_t[i, j] = all_ext_vocab_targets[j][i]
         if USE_CUDA:
-            y_t = y_t.to("cuda:0")
+            y_t = y_t.cuda()
             
         all_step_mask = torch.stack(all_step_mask, dim=1)
         target_lens = torch.sum(all_step_mask,dim=1)
@@ -618,7 +623,7 @@ class PointerAttnSeqToSeq(nn.Module):
                 else:
                     all_targets[i, j] = all_ext_vocab_targets[i,j]
         if USE_CUDA:
-            all_targets = all_targets.to("cuda:0")
+            all_targets = all_targets.cuda()
         return all_targets, all_ext_vocab_targets, target_lens.long()
 
     def get_rl_loss(self, batch, sensation_model, use_s_score):
@@ -636,8 +641,8 @@ class PointerAttnSeqToSeq(nn.Module):
         step_mask = Variable(torch.ones(batch_size)).float()
         all_step_mask = []
         if USE_CUDA:
-            # y_t_1 = y_t_1.to("cuda:0")
-            step_mask = step_mask.to("cuda:0")
+            # y_t_1 = y_t_1.cuda()
+            step_mask = step_mask.cuda()
         all_targets = []
         all_output1 = []
         
@@ -678,7 +683,7 @@ class PointerAttnSeqToSeq(nn.Module):
             #     else:
             #         y_t_1[i] = target[i]
             # if USE_CUDA:
-            #     y_t_1 = y_t_1.to("cuda:0")
+            #     y_t_1 = y_t_1.cuda()
 
         # this is the linear layer that calculates \hat{R}_t
         # print(all_output1, all_step_mask)
@@ -728,7 +733,7 @@ class PointerAttnSeqToSeq(nn.Module):
 
         # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         # if USE_CUDA:
-        #     y_t_1 = y_t_1.to("cuda:0")
+        #     y_t_1 = y_t_1.cuda()
 
         for di in range(min(targets['input_ids'].shape[-1], self.args["max_r"])):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
@@ -780,7 +785,7 @@ class PointerAttnSeqToSeq(nn.Module):
 
         # y_t_1 = Variable(torch.LongTensor([SOS_idx] * batch_size))
         # if USE_CUDA:
-        #     y_t_1 = y_t_1.to("cuda:0")
+        #     y_t_1 = y_t_1.cuda()
 
         for di in range(min(targets['input_ids'].shape[-1], self.args["max_r"])):
             # final_dist, s_t_1,  c_t_1, attn_dist, p_gen, coverage, _ = self.decoder(y_t_1, s_t_1,
@@ -812,8 +817,8 @@ class PointerAttnSeqToSeq(nn.Module):
         sampled_length = Variable(torch.zeros(batch_size)).long()
         sampled_outputs = Variable(torch.ones(batch_size,self.max_r) * PAD_idx).long()
         if USE_CUDA:
-            sampled_outputs = sampled_outputs.to("cuda:0")
-            sampled_length = sampled_length.to("cuda:0")
+            sampled_outputs = sampled_outputs.cuda()
+            sampled_length = sampled_length.cuda()
         for i in range(batch_size):
             for j in range(self.max_r):
                 sampled_outputs[i,j] = decoder_outputs[j][i]
@@ -830,12 +835,12 @@ class PointerAttnSeqToSeq(nn.Module):
         batch_size = sample.size(1)
         decoder_inputs = Variable(torch.LongTensor([SOS_idx] * batch_size))
         if USE_CUDA:
-            decoder_inputs = decoder_inputs.to("cuda:0")
+            decoder_inputs = decoder_inputs.cuda()
         log_probs = []
         for t in range(self.max_r):
             decoder_emb = self.embedding(decoder_inputs)
             if USE_CUDA:
-                decoder_emb = decoder_emb.to("cuda:0")
+                decoder_emb = decoder_emb.cuda()
             decoder_vocab, decoder_hidden = self.decoder(decoder_emb, decoder_hidden, encoder_outputs)
             decoder_vocab = F.log_softmax(decoder_vocab, 1)
             decoder_inputs = sample[t]
@@ -861,7 +866,7 @@ class PointerAttnSeqToSeq(nn.Module):
         assert decode_type == "beam"
         inputs, _, _ = self.init_batch(batch, individual_tokenization=True)
         if USE_CUDA:
-            inputs = [{key: item.to('cuda:0') for key, item in inp.items()} for inp in inputs]
+            inputs = [{key: item.cuda() for key, item in inp.items()} for inp in inputs]
 
         outputs = [self.decoder.generate(**inp, num_beams=5, max_length=256) for inp in inputs]
         # print(outputs[0], type(outputs[0]))

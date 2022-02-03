@@ -1,13 +1,13 @@
 #Except for the pytorch part content of this file is copied from https://github.com/abisee/pointer-generator/blob/master/
 
 from __future__ import unicode_literals, print_function, division
-from utils.config import *
+from sutils.config import *
 import sys
 from zhon.hanzi import punctuation
 import  string
 # reload(sys)
 # sys.setdefaultencoding('utf8')
-from utils.rouge import rouge
+from sutils.rouge import rouge
 import os
 import time
 import torch
@@ -134,7 +134,7 @@ class BeamSearch(object):
                              for t in latest_tokens]
             y_t_1 = Variable(torch.LongTensor(latest_tokens))
             if USE_CUDA:
-                y_t_1 = y_t_1.to("cuda:0")
+                y_t_1 = y_t_1.cuda()
             all_state_h =[]
             all_state_c = []
 

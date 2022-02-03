@@ -1,6 +1,6 @@
 import argparse
 import logging
-from utils.global_variables import *
+from sutils.global_variables import *
 
 UNK_idx = 0
 PAD_idx = 1
