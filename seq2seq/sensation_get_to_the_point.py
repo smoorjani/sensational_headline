@@ -445,7 +445,7 @@ class PointerAttnSeqToSeq(nn.Module):
         # print(sensation_model)
         if USE_CUDA:
             # batch = batch.to('cuda:1')
-            batch = batch.cuda()
+            batch = batch.to( next(sensation_model.parameters()).device)
 
         try:
             rewards = sensation_model(batch)
@@ -475,13 +475,18 @@ class PointerAttnSeqToSeq(nn.Module):
         rewards = rewards.detach()
         return rewards, 0.0
 
-    def init_batch(self, batch, individual_tokenization=False):
+    def init_batch(self, batch, individual_tokenization=False, max_input_len=None):
         texts = batch['input_txt']
         target_texts = batch['target_txt']
+
+        print(f'Texts: {texts}\nTarget: {target_texts}')
 
         inputs, targets, batch_size = None, None, 0
         if individual_tokenization:
             inputs = [self.tokenizer(text, return_tensors="pt") for text in texts]
+            if max_input_len:
+                inputs = [{key: item[:max_input_len] for key, item in inp.items()} for inp in inputs]
+
             targets = [self.tokenizer(target, return_tensors="pt") for target in target_texts]
 
             if USE_CUDA:
@@ -508,27 +513,27 @@ class PointerAttnSeqToSeq(nn.Module):
         return inputs, targets, batch_size
 
     def run_decoder(self, inputs):
-        print(inputs)
+        # print(inputs)
         attention_mask = inputs['attention_mask']
         # outputs = self.decoder.generate(**inputs, num_beams=5, max_length=inputs['input_ids'].shape[-1] + 1, return_dict_in_generate=True, output_scores=True)
-        print('calling outputs')
-        total_memory = 0
-        for obj in gc.get_objects():
-            try:
-                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    # print(type(obj), obj.size())
+        # print('calling outputs')
+        # total_memory = 0
+        # for obj in gc.get_objects():
+        #     try:
+        #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+        #             # print(type(obj), obj.size())
 
-                    acc = 4
-                    for dim in obj.size():
-                        acc *= dim
+        #             acc = 4
+        #             for dim in obj.size():
+        #                 acc *= dim
 
-                    total_memory += acc
+        #             total_memory += acc
 
-            except:
-                pass
-        print(f'Storage requirements: {total_memory}')
+        #     except:
+        #         pass
+        # print(f'Storage requirements: {total_memory}')
         outputs = self.decoder(**inputs)
-        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
+        # print('chkpt2\n', torch.cuda.memory_summary(), '\n')
 
         # get next token
         final_dist = outputs.logits[:, -1, :]
@@ -654,7 +659,6 @@ class PointerAttnSeqToSeq(nn.Module):
             #                                                         coverage, di, training=True)
             torch.cuda.empty_cache()
             print(f'get_rl_loss loop {di}')
-            print('chkpt1\n', torch.cuda.memory_summary(), '\n')
             inputs, outputs, final_dist = self.run_decoder(inputs)
             # do this to avoid negatives being fed into multinomial
             final_dist = final_dist.softmax(dim=1)
@@ -663,6 +667,8 @@ class PointerAttnSeqToSeq(nn.Module):
             all_targets.append(target.detach())
             # TODO: how to get output1, just use hidden states? that is shape (batch, seq_len, hidden_dim)
             output1 = outputs['hidden_states'][-1][:, -1, :]
+            output1 = output1.float()
+            # print(f'Output type: {output1.dtype}')
             # this is some hidden state (batch * hidden_dim) -> o_t
             all_output1.append(output1)
             # TODO:why are the gold probs coming from the decoder? seems to be misnamed
@@ -674,6 +680,7 @@ class PointerAttnSeqToSeq(nn.Module):
             all_step_mask.append(step_mask)
             step_losses.append(step_loss)
             step_mask = torch.clamp(step_mask - (target == EOS_idx).float(), min=0.0)
+            # print('chkpt0\n', torch.cuda.memory_summary(), '\n')
 
             # print(all_step_mask[-1].size(), all_targets[-1].size(), all_output1[-1].size(), step_losses[-1].size())
             # y_t_1 = Variable(torch.zeros(batch_size)).long()  # sampling
@@ -687,11 +694,14 @@ class PointerAttnSeqToSeq(nn.Module):
 
         # this is the linear layer that calculates \hat{R}_t
         # print(all_output1, all_step_mask)
+        print('chkpt1\n', torch.cuda.memory_summary(), '\n')
         baseline_rewards = [self.expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach() \
                                             for output1, step_mask in zip(all_output1, all_step_mask)]
+        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
         baseline_rewards = torch.cat(baseline_rewards, dim=1)
         all_step_mask = torch.stack(all_step_mask, dim=1).float()
         dec_lens_var = torch.sum(all_step_mask,dim=1)
+        print('chkpt3\n', torch.cuda.memory_summary(), '\n')
         decoded_sents = self.decoded_batch_to_txt(all_targets)
         # print(decoded_sents, len(decoded_sents))
         total_reward, probs = self.get_reward(decoded_sents, batch, sensation_model)
@@ -701,6 +711,9 @@ class PointerAttnSeqToSeq(nn.Module):
         # torch.Size([batch, 1]) torch.Size([batch, max_r])
         # print(total_reward.shape, baseline_rewards.shape)
         reward =  total_reward.detach() - baseline_rewards.detach()
+        print('chkpt4\n', torch.cuda.memory_summary(), '\n')
+        torch.cuda.empty_cache()
+        
         sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
         # this is for ARL
         if use_s_score:
@@ -715,7 +728,7 @@ class PointerAttnSeqToSeq(nn.Module):
             loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
 
         rewards_loss = torch.sum((total_reward - baseline_rewards) ** 2 * all_step_mask) / torch.sum(all_step_mask)
-
+        print('chkpt5\n', torch.cuda.memory_summary(), '\n')
         return total_reward.mean(), loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
 
     def get_loss(self, batch, use_s_score=False, return_full_loss=False):

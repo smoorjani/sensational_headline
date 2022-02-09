@@ -164,7 +164,6 @@ class Trainer(object):
         if backward:
             fake_loss.backward(retain_graph=True)
         fake_acc = ((probs > 0.5).long() == fake_labels.long()).float().sum() * 1.0 / fake_labels.size(0)
-
         loss = (true_loss.data + fake_loss.data) / 2
         # acc = (true_acc +  fake_acc) / 2
         if backward:

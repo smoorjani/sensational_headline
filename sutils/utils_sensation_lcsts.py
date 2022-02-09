@@ -222,8 +222,10 @@ def read_langs(file_name, thd=0.0):
                     continue
                 headline, score, article = elements
                 d = {}
-                d["x"] = article
-                d["y"] = headline
+                # d["x"] = article
+                # d["y"] = headline
+                d["y"] = article # argument
+                d["x"] = headline # prompt
                 d["s"] = float(score)
                 if d["s"] < thd:
                     continue
