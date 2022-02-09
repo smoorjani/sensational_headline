@@ -1,112 +1,16 @@
+import os
 import numpy as np
 import logging
 from tqdm import tqdm
 from utils.config import *
-from utils.utils_sensation_lcsts import *
+from utils.data_utils import *
 from torch.nn.utils import clip_grad_norm
-from seq2seq.sensation_get_to_the_point import *
-from seq2seq.sensation_scorer import PersuasivenessClassifier
+from models.batch_utils import *
+from models.sensation_scorer import PersuasivenessClassifier
 import logging
 import copy
 from utils.rouge import rouge
 from utils.function import *
-
-
-# from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
-from transformers import BertTokenizer
-
-class PersuasivePairsDataset(Dataset):
-    """Persuasive pairs dataset."""
-
-    def __init__(
-        self,
-        persuasive_pairs_df,
-        columns: dict = {'label': 'label',
-                         'sentence_a': 'sentence_a', 'sentence_b': 'sentence_b'},
-    ):
-        """
-        Args:
-            persuasive_pairs_df (pd.DataFrame): dataframe of persuasive pairs
-            columns (dict): columns with default column names paired with custom ones
-        """
-        self.persuasive_pairs_df = persuasive_pairs_df
-        self.columns = columns
-
-    def __len__(self):
-        return len(self.persuasive_pairs_df)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = int(idx.data)
-
-        data_idx = self.persuasive_pairs_df[idx]
-        label = data_idx[self.columns['label']]
-        sentence_a = data_idx[self.columns['sentence_a']]
-        sentence_b = data_idx[self.columns['sentence_b']]
-
-        return {
-            'texts': [sentence_a, sentence_b],
-            'label': int(label)
-        }
-
-def get_data_loaders(args, tokenizer,
-                     train_dir='../persuasive_classifier/16k_persuasiveness/data/UKPConvArg1Strict-XML/',
-                     test_dir='../persuasive_classifier/16k_persuasiveness/data/UKPConvArg1Strict-XML/'):
-    '''
-    Gets the train and test dataloaders from the data loader function.
-
-    Args:
-        args: command-line arguments
-        tokenizer: tokenizer for tokenizing samples
-        dataset_type: type of dataset corresponding to model type
-        data_loader_fn: function to load data from directories
-        train_dir: directory to load training data from
-        test_dir: directory to load testing data from
-    Returns:
-        a train and test dataloader
-    '''
-
-    train_dataset, test_dataset = None, None
-    train_dataloader, test_dataloader = None, None
-
-    if train_dir == test_dir:
-        # data is in the same file/directory
-        persuasive_pairs = data_loader_fn(
-            train_dir,
-            exclude_equal_arguments=args.exclude_equal_arguments
-        )
-
-        # random train/test split
-        total_length = len(persuasive_pairs)
-        random.shuffle(persuasive_pairs)
-        split = int(args.train_test_split * total_length)
-        train_dataset = persuasive_pairs[:split]
-        test_dataset = persuasive_pairs[split:]
-    else:
-        train_dataset = data_loader_fn(
-            train_dir,
-            exclude_equal_arguments=args.exclude_equal_arguments
-        )
-        test_dataset = data_loader_fn(
-            test_dir,
-            exclude_equal_arguments=args.exclude_equal_arguments
-        )
-
-    if dataset_type == PersuasivePairsDataset:
-        persuasive_pairs_train = dataset_type(train_dataset, tokenizer)
-        persuasive_pairs_test = dataset_type(test_dataset, tokenizer)
-    else:
-        persuasive_pairs_train = dataset_type(train_dataset)
-        persuasive_pairs_test = dataset_type(test_dataset)
-
-    if args.do_train:
-        train_dataloader = DataLoader(persuasive_pairs_train, batch_size=args.train_batch_size,
-                                      shuffle=True, num_workers=0)
-    if args.do_eval:
-        test_dataloader = DataLoader(persuasive_pairs_test, batch_size=args.test_batch_size,
-                                     shuffle=False, num_workers=0)
-
-    return train_dataloader, test_dataloader
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -115,25 +19,13 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        # args['batch_size'] = 4
-        # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        # lang = Lang(list(tokenizer.encoder.keys()))
+
         with open("vocab.txt", "r") as f:
             vocab = f.readlines()
         vocab = list(map(lambda x: x.strip().replace('#',''), vocab))
-        # print(vocab)
-        # setting args for our data loader function
-        # args.exclude_equal_arguments = True
-        # args.train_test_split = 0.8
-        # args.do_train = True
-        # args.do_eval = True
-        # train, dev = get_data_loaders(args, tokenizer)
-        # test = dev
 
-        train, dev, test, lang, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], debug=args["debug"], shuffle=True, pointer_gen=args["pointer_gen"], vocab=vocab, thd=args["thd"])
-        args["vocab_size"] = lang.n_words
-        print(args["vocab_size"])
-        args["output_vocab_size"] = lang.n_words
+
+        train, dev, test, max_q, max_r = prepare_data_seq(batch_size=args['batch_size'], shuffle=True, thd=args["thd"])
         args["max_q"] = max_q
         args["max_r"] = max_r
 
@@ -142,10 +34,8 @@ class Trainer(object):
         self.train = train
         self.dev = dev
         self.test = test
-        self.lang = lang
 
-        # model = globals()[args["model_type"]](args, lang, max_q, max_r)
-        model = PointerAttnSeqToSeq(self.args, lang)
+        model = PointerAttnSeqToSeq(self.args)
         self.model = model
         if USE_CUDA:
             self.model = self.model.to("cuda:0")
@@ -159,15 +49,8 @@ class Trainer(object):
 
         self.loss, self.acc, self.reward, self.print_every = 0.0, 0.0, 0.0, 1
 
-        # assert args["sensation_scorer_path"] is not None
-        # opts = torch.load(args["sensation_scorer_path"]+"/args.th")
-        # self.sensation_model = SensationCNN(opts, self.lang)
-        # logging.info("load checkpoint from {}".format(args["sensation_scorer_path"]))
-        # checkpoint = torch.load(args["sensation_scorer_path"]+"/sensation_scorer.th")
-        # self.sensation_model.load_state_dict(checkpoint['model'])
         print('Loading sensation model...')
         self.sensation_model = PersuasivenessClassifier(self.lang)
-        # sys.path.insert(0, '../persuasive_classifier/models')
         self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
         self.sensation_model.bert.resize_token_embeddings(len(vocab))
         if USE_CUDA:
@@ -242,9 +125,9 @@ class Trainer(object):
         self.optimizer.zero_grad()
         assert self.args["use_s_score"] is not None
         if self.args["use_rl"]:
-            r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            r, loss, expected_rewards_loss = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
         else:
-            _, loss, acc = self.model.get_loss(batch)
+            loss = self.model.get_loss(batch)
 
         # loss = Variable(loss, requires_grad = True)
         # loss.backward(create_graph = True)
@@ -255,11 +138,9 @@ class Trainer(object):
         self.optimizer.step()
 
         self.loss += loss.data 
-        self.acc += acc.data
         if self.args["use_rl"]:
             self.reward += r.data
-
-        if self.args["use_rl"]:
+            
             self.rl_optimizer.zero_grad()
             expected_rewards_loss.backward()
             self.rl_optimizer.step()
@@ -297,14 +178,7 @@ class Trainer(object):
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
-                # print(batch)
-                #print('Decoding: ')
-                #====
-                # decoded_sents = self.model.decode_batch(batch,"beam")
-                #print('Decoded:', decoded_sents)
-                #print(len(decoded_sents), [len(sent) for sent in decoded_sents])
-                #====
-                # return
+
                 if self.args['debug'] and j>1100:
                     break
                 
@@ -314,9 +188,6 @@ class Trainer(object):
                     logging_step = 10
 
                 if j % logging_step == 0 and j:
-                    # if self.args["use_rl"]:
-                    #     save_folder = "logs/Rl/"+"_".join([str(self.args[a]) for a in save_params]) 
-                    #     os.makedirs(save_folder, exist_ok=True)
 
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
                     old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
