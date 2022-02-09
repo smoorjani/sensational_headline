@@ -251,7 +251,8 @@ class Trainer(object):
         self.optimizer.zero_grad()
         assert self.args["use_s_score"] is not None
         if self.args["use_rl"]:
-            r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            # r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            r, loss, acc, expected_rewards_loss, _ = self.model.get_losses(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
         else:
             _, loss, acc = self.model.get_loss(batch)
 

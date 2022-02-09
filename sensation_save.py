@@ -154,7 +154,8 @@ class Trainer(object):
         self.optimizer.zero_grad()
 
         if self.args["use_rl"]:
-            r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model)
+            # r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model)
+            r, loss, acc, expected_rewards_loss, _ = self.model.get_losses(batch, self.sensation_model)
         else:
             _, loss, acc = self.model.get_loss(batch)
 

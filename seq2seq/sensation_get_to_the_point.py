@@ -631,6 +631,20 @@ class PointerAttnSeqToSeq(nn.Module):
             all_targets = all_targets.cuda()
         return all_targets, all_ext_vocab_targets, target_lens.long()
 
+    def get_losses(self, batch, sensation_model, use_s_score):
+        print('chkpt0\n', torch.cuda.memory_summary(), '\n')
+        total_reward, rl_loss, _, rewards_loss, probs = self.get_rl_loss(batch, sensation_model, use_s_score=use_s_score)
+        torch.cuda.empty_cache()
+        print('chkpt3\n', torch.cuda.memory_summary(), '\n')
+        _, ml_loss, _ = self.get_loss(batch, use_s_score=use_s_score)
+
+        if use_s_score:
+            loss = rl_loss +  ml_loss
+        else:
+            loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
+
+        return total_reward, loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
+
     def get_rl_loss(self, batch, sensation_model, use_s_score):
 
         # enc_batch, enc_padding_mask, enc_lens, enc_batch_extend_vocab, extra_zeros, c_t_1, coverage = self.get_input_from_batch(batch)
@@ -697,11 +711,11 @@ class PointerAttnSeqToSeq(nn.Module):
         print('chkpt1\n', torch.cuda.memory_summary(), '\n')
         baseline_rewards = [self.expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach() \
                                             for output1, step_mask in zip(all_output1, all_step_mask)]
-        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
+        # print('chkpt2\n', torch.cuda.memory_summary(), '\n')
         baseline_rewards = torch.cat(baseline_rewards, dim=1)
         all_step_mask = torch.stack(all_step_mask, dim=1).float()
         dec_lens_var = torch.sum(all_step_mask,dim=1)
-        print('chkpt3\n', torch.cuda.memory_summary(), '\n')
+        # print('chkpt3\n', torch.cuda.memory_summary(), '\n')
         decoded_sents = self.decoded_batch_to_txt(all_targets)
         # print(decoded_sents, len(decoded_sents))
         total_reward, probs = self.get_reward(decoded_sents, batch, sensation_model)
@@ -711,7 +725,7 @@ class PointerAttnSeqToSeq(nn.Module):
         # torch.Size([batch, 1]) torch.Size([batch, max_r])
         # print(total_reward.shape, baseline_rewards.shape)
         reward =  total_reward.detach() - baseline_rewards.detach()
-        print('chkpt4\n', torch.cuda.memory_summary(), '\n')
+        # print('chkpt4\n', torch.cuda.memory_summary(), '\n')
         torch.cuda.empty_cache()
         
         sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
@@ -721,15 +735,16 @@ class PointerAttnSeqToSeq(nn.Module):
         else:
             batch_avg_loss = sum_losses/dec_lens_var.float()
         rl_loss = torch.mean(batch_avg_loss)
-        _, ml_loss, _ = self.get_loss(batch, use_s_score=use_s_score)
-        if use_s_score:
-            loss = rl_loss +  ml_loss
-        else:
-            loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
+        # _, ml_loss, _ = self.get_loss(batch, use_s_score=use_s_score)
+        # if use_s_score:
+        #     loss = rl_loss +  ml_loss
+        # else:
+        #     loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
 
         rewards_loss = torch.sum((total_reward - baseline_rewards) ** 2 * all_step_mask) / torch.sum(all_step_mask)
-        print('chkpt5\n', torch.cuda.memory_summary(), '\n')
-        return total_reward.mean(), loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
+        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
+        # return total_reward.mean(), loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
+        return total_reward.mean(), rl_loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
 
     def get_loss(self, batch, use_s_score=False, return_full_loss=False):
         # calculates MLE loss
@@ -753,6 +768,8 @@ class PointerAttnSeqToSeq(nn.Module):
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
+            print(f'get_loss loop {di}')
+            print(f'chkpt4.{di}\n {torch.cuda.memory_summary()}\n')
             inputs, _, final_dist = self.run_decoder(inputs)
             # final_dist = Variable(final_dist, requires_grad=True).cuda()
             target = target_batch[:, di]
