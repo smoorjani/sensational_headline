@@ -448,7 +448,8 @@ class PointerAttnSeqToSeq(nn.Module):
             batch = batch.to( next(sensation_model.parameters()).device)
 
         try:
-            rewards = sensation_model(batch)
+            with torch.no_grad():
+                rewards = sensation_model(batch)
         except RuntimeError:
             print('Runtime Error!')
             print(f'decoded: {decoded_sents}')
@@ -638,12 +639,12 @@ class PointerAttnSeqToSeq(nn.Module):
         print('chkpt3\n', torch.cuda.memory_summary(), '\n')
         _, ml_loss, _ = self.get_loss(batch, use_s_score=use_s_score)
 
-        if use_s_score:
-            loss = rl_loss +  ml_loss
-        else:
-            loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
+        # if use_s_score:
+        #     loss = rl_loss +  ml_loss
+        # else:
+        #     loss = (1 - self.args["ml_wt"]) * rl_loss + self.args["ml_wt"] * ml_loss
 
-        return total_reward, loss, Variable(torch.FloatTensor([0.0])), rewards_loss, probs
+        return total_reward, rl_loss, ml_loss, rewards_loss, probs
 
     def get_rl_loss(self, batch, sensation_model, use_s_score):
 
@@ -671,7 +672,7 @@ class PointerAttnSeqToSeq(nn.Module):
             #                                             encoder_outputs, enc_padding_mask, c_t_1,
             #                                             extra_zeros, enc_batch_extend_vocab,
             #                                                         coverage, di, training=True)
-            torch.cuda.empty_cache()
+
             print(f'get_rl_loss loop {di}')
             inputs, outputs, final_dist = self.run_decoder(inputs)
             # do this to avoid negatives being fed into multinomial
@@ -726,7 +727,6 @@ class PointerAttnSeqToSeq(nn.Module):
         # print(total_reward.shape, baseline_rewards.shape)
         reward =  total_reward.detach() - baseline_rewards.detach()
         # print('chkpt4\n', torch.cuda.memory_summary(), '\n')
-        torch.cuda.empty_cache()
         
         sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
         # this is for ARL

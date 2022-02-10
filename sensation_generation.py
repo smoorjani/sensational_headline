@@ -15,6 +15,9 @@ import sys
 import deepspeed
 from transformers.deepspeed import HfDeepSpeedConfig
 
+def toggle_grad(model, require_grads=False):
+    for param in model.parameters():
+        param.requires_grad = require_grads
 
 # from persuasiveness_classifier import PersuasivenessClassifier, get_persuasive_pairs_xml
 from transformers import BertTokenizer
@@ -174,9 +177,13 @@ class Trainer(object):
         # sys.path.insert(0, '../persuasive_classifier/models')
         self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
         self.sensation_model.bert.resize_token_embeddings(len(vocab))
+        toggle_grad(self.sensation_model, False)
+    
+
+
         if USE_CUDA:
-            # self.sensation_model.to('cuda:1')
-            self.sensation_model.cuda()
+            self.sensation_model.to('cuda:1')
+            # self.sensation_model.cuda()
             print('Sensation model is on: ', next(self.sensation_model.parameters()).device)
 
         if self.args['optimizer'] == "adam":
@@ -252,13 +259,23 @@ class Trainer(object):
         assert self.args["use_s_score"] is not None
         if self.args["use_rl"]:
             # r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
-            r, loss, acc, expected_rewards_loss, _ = self.model.get_losses(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            # r, rl_loss, ml_loss, expected_rewards_loss, _ = self.model.get_losses(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            print('Starting RL loss...')
+            total_reward, rl_loss, _, rewards_loss, probs = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            rl_loss.backward()
+            print('Finished RL loss...')
+            torch.cuda.empty_cache()
+            print('Starting MLE loss...')
+            _, ml_loss, _ = self.model.get_loss(batch, use_s_score=self.args["use_s_score"])
+            ml_loss.backward()
         else:
             _, loss, acc = self.model.get_loss(batch)
 
         # loss = Variable(loss, requires_grad = True)
         # loss.backward(create_graph = True)
-        loss.backward()
+        
+        
+
 
         clip_grad_norm(self.model.parameters(), self.args["max_grad_norm"])
 
