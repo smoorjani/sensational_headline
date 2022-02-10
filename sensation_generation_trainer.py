@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     print('Loading persuasiveness classifier...')
     sensation_model = PersuasivenessClassifier(bert_tokenizer.pad_token)
-    sensation_model.load_state_dict(torch.load(args['persuasivness_clasifier_path']))
+    sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
     # sensation_model.bert.resize_token_embeddings(len(vocab))
 
     # TODO: optimizers, RL and GPT
@@ -108,7 +108,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         train_dataset=train_dataloader,
         eval_dataset=eval_dataloader,
-        custom_args=args,
+        custom_args=custom_args,
         sensation_model=sensation_model,
         classifier_tokenizer=bert_tokenizer
     )
