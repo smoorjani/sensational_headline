@@ -6,7 +6,7 @@ from models.sensation_scorer import get_reward
 from utils.config import *
 
 def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score):
-    inputs, _, batch_size = init_batch(batch)
+    inputs, _, batch_size = init_batch(tokenizer, batch)
 
     step_mask = Variable(torch.ones(batch_size)).float()
     
@@ -80,7 +80,7 @@ def get_loss(args, decoder, tokenizer, batch, use_s_score=False):
     _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
         batch)
 
-    inputs, targets, _ = init_batch(batch)
+    inputs, targets, _ = init_batch(tokenizer, batch)
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
@@ -111,7 +111,7 @@ def get_prob(args, decoder, tokenizer, batch):
     _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
         batch)
 
-    inputs, targets, _ = init_batch(batch)
+    inputs, targets, _ = init_batch(tokenizer, batch)
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):

@@ -1,14 +1,14 @@
 import argparse
 import logging
-USE_CUDA = True
+USE_CUDA = False
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%m-%d %H:%M')#,filename='save/logs/{}.log'.format(str(name)))
 
 def get_args():
     parser = argparse.ArgumentParser(description="argument for nn parameters")
     parser.add_argument("--ml_wt", type=float, default=0.0, help="mle weight for combining")
-    parser.add_argument("--use_s_score", type=int, default=None, help="whether use sensation score or not in the rl training")
-    parser.add_argument("--thd", type=float, default=None, help="thredhold for training")
+    parser.add_argument("--use_s_score", type=int, default=1, help="whether use sensation score or not in the rl training")
+    parser.add_argument("--thd", type=float, default=0.1, help="thredhold for training")
 
     # seq2seq parameters
     ## nn parameters
@@ -20,8 +20,8 @@ def get_args():
     parser.add_argument("--rl_lr", type=float, default=0.001, help="learning rate of rl")
 
     parser.add_argument('--persuasivness_clasifier_path', type=str, default="persuasive_model.pt", help="load existing persuasiveness model") 
-    parser.add_argument('--training_data', type=str, default="persuasive_pairs_train.txt", help="training data") 
-    parser.add_argument('--eval_data', type=str, default="persuasive_pairs_test.txt", help="eval data") 
+    parser.add_argument('--training_data', type=str, default="persuasive_pairs_data_train.txt", help="training data") 
+    parser.add_argument('--eval_data', type=str, default="persuasive_pairs_data_test.txt", help="eval data") 
     
     ## optimization
     parser.add_argument('-lr', type=float, default=0.0001, help="learning rate")
@@ -38,6 +38,8 @@ def get_args():
     assert args["thd"] is not None
     args["use_s_score"] = bool(args["use_s_score"])
     logging.info(args)
+
+    return args
 
 
 

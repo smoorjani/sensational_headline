@@ -8,9 +8,11 @@ from utils.data_utils import prepare_data_seq
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, custom_args, sensation_model, classifier_tokenizer):
-        super(CustomTrainer, self).__init__()
+    def __init__(self, model, tokenizer, train_dataloader, eval_dataloader, custom_args, sensation_model, classifier_tokenizer):
+        super(CustomTrainer, self).__init__(model=model, tokenizer=tokenizer)
         self.custom_args = custom_args
+        self.train_dataloader = train_dataloader
+        self.eval_dataloader = eval_dataloader
 
         self.sensation_model = sensation_model
         self.expected_reward_layer = torch.nn.Linear(
@@ -20,6 +22,12 @@ class CustomTrainer(Trainer):
 
         self.expected_rewards_loss = 0
 
+    def get_train_dataloader(self):
+        return self.train_dataloader
+
+    def get_eval_dataloader(self, eval_dataset= None):
+        return self.eval_dataloader
+
     def training_step(self, model, inputs):
         model.train()
         inputs = self._prepare_inputs(inputs)
@@ -27,7 +35,7 @@ class CustomTrainer(Trainer):
         with self.autocast_smart_context_manager():
             # loss = self.compute_loss(model, inputs)
             _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-                                                        self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.args["use_s_score"])
+                                                        self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
 
         if self.args.n_gpu > 1:
             loss = loss.mean()
@@ -64,7 +72,7 @@ class CustomTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False):
         _, loss, _ = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-                                 self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.args["use_s_score"])
+                                 self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
 
         outputs = None
         if return_outputs:
@@ -77,7 +85,7 @@ if __name__ == "__main__":
     custom_args = get_args()
 
     print('Loading data...')
-    train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'])
+    train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
     custom_args['max_q'] = max_q
     custom_args['max_r'] = max_r
 
@@ -93,7 +101,7 @@ if __name__ == "__main__":
 
     print('Loading persuasiveness classifier...')
     sensation_model = PersuasivenessClassifier(bert_tokenizer.pad_token)
-    sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
+    # sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
     # sensation_model.bert.resize_token_embeddings(len(vocab))
 
     # TODO: optimizers, RL and GPT
@@ -103,12 +111,15 @@ if __name__ == "__main__":
         sensation_model = sensation_model.to("cuda")
         decoder = decoder.to("cuda")
 
-    CustomTrainer(
+    trainer = CustomTrainer(
         model=decoder,
         tokenizer=tokenizer,
-        train_dataset=train_dataloader,
-        eval_dataset=eval_dataloader,
+        train_dataloader=train_dataloader,
+        eval_dataloader=eval_dataloader,
         custom_args=custom_args,
         sensation_model=sensation_model,
         classifier_tokenizer=bert_tokenizer
     )
+
+    train_result = trainer.train()
+    trainer.save_model()
