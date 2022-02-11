@@ -2,9 +2,9 @@ from transformers.generation_logits_process import LogitsProcessorList
 import torch
 
 from numpy import random
-from utils.masked_cross_entropy import sequence_mask
+from dutils.masked_cross_entropy import sequence_mask
 
-from utils.config import *
+from dutils.config import *
 
 random.seed(123)
 torch.manual_seed(123)
@@ -23,10 +23,10 @@ def init_batch(tokenizer, batch, individual_tokenization=False):
                     for target in target_texts]
 
         if USE_CUDA:
-            inputs = [{key: item.to('cuda:0')
+            inputs = [{key: item.to('cuda')
                         for key, item in inp.items()} for inp in inputs]
             inputs = [
-                {key: item.to('cuda:0') for key, item in target.items()} for target in targets]
+                {key: item.to('cuda') for key, item in target.items()} for target in targets]
 
         batch_size = len(inputs)
     else:
@@ -38,9 +38,9 @@ def init_batch(tokenizer, batch, individual_tokenization=False):
             target_texts, return_tensors="pt", padding=True)
 
         if USE_CUDA:
-            inputs = {key: item.to('cuda:0')
+            inputs = {key: item.to('cuda')
                         for key, item in inputs.items()}
-            targets = {key: item.to('cuda:0')
+            targets = {key: item.to('cuda')
                         for key, item in targets.items()}
 
         batch_size = inputs['input_ids'].shape[0]
@@ -98,7 +98,7 @@ def decode_batch(decoder, tokenizer, batch):
     decoder.train(False)
     inputs, _, _ = init_batch(batch, individual_tokenization=True)
     if USE_CUDA:
-        inputs = [{key: item.to('cuda:0')
+        inputs = [{key: item.to('cuda')
                     for key, item in inp.items()} for inp in inputs]
 
     outputs = [decoder.generate(

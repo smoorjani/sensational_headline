@@ -3,7 +3,7 @@ from torch.autograd import Variable
 
 from models.batch_utils import decoded_batch_to_txt, get_output_from_batch, init_batch, run_decoder
 from models.sensation_scorer import get_reward
-from utils.config import *
+from dutils.config import *
 
 def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score):
     inputs, _, batch_size = init_batch(tokenizer, batch)
@@ -11,7 +11,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
     step_mask = Variable(torch.ones(batch_size)).float()
     
     if USE_CUDA:
-        step_mask = step_mask.to("cuda:0")
+        step_mask = step_mask.to("cuda")
 
     all_step_mask = []
     all_targets = []

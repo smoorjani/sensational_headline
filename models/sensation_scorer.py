@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import BertModel
 
-from utils.config import *
+from dutils.config import *
 
 class PersuasivenessClassifier(nn.Module):
     def __init__(self, PAD_token, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
@@ -35,7 +35,7 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer):
         sents, return_tensors='pt', padding=True)['input_ids']
 
     if USE_CUDA:
-        batch = batch.to('cuda:1')
+        batch = batch.to('cuda')
 
     try:
         rewards = sensation_model(batch)
@@ -45,11 +45,11 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer):
         print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
         raise RuntimeError
 
-    rewards = rewards.to('cuda:0')
+    rewards = rewards.to('cuda')
     w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list)
                             if len(word_list) else 1 for word_list in decoded_sents])
     if USE_CUDA:
-        w = w.to("cuda:0")
+        w = w.to("cuda")
 
     sensation_reward = rewards * w
     return sensation_reward.detach()

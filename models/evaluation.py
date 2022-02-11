@@ -5,7 +5,7 @@ from models.losses import get_prob
 from models.batch_utils import decode_batch
 from models.sensation_scorer import get_reward
 
-from utils.rouge import rouge
+from dutils.rouge import rouge
 
 class Evaluation():
     def __init__(self, decoder, tokenizer, classifier_tokenizer):

@@ -1,7 +1,7 @@
 import torch
 import torch.utils.data as data
 from torch.autograd import Variable
-from utils.config import *
+from dutils.config import *
 import logging
 from transformers import BertTokenizer
 
@@ -65,11 +65,11 @@ def collate_fn(data):
     sensation_scores = Variable(torch.FloatTensor(item_info["sensation_score"]))
 
     if USE_CUDA:
-        input_batch = input_batch.to("cuda:0")
-        target_batch = target_batch.to("cuda:0")
-        input_lengths = input_lengths.to("cuda:0")
-        target_lengths = target_lengths.to("cuda:0")
-        sensation_scores = sensation_scores.to("cuda:0")
+        input_batch = input_batch.to("cuda")
+        target_batch = target_batch.to("cuda")
+        input_lengths = input_lengths.to("cuda")
+        target_lengths = target_lengths.to("cuda")
+        sensation_scores = sensation_scores.to("cuda")
 
     d = {}
     d["input_batch"] = input_batch

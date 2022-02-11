@@ -1,6 +1,6 @@
 import argparse
 import logging
-USE_CUDA = False
+USE_CUDA = True
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%m-%d %H:%M')#,filename='save/logs/{}.log'.format(str(name)))
 
@@ -11,6 +11,8 @@ def get_args():
     parser.add_argument("--thd", type=float, default=0.1, help="thredhold for training")
 
     # seq2seq parameters
+    parser.add_argument('--local_rank', type=int, default=0, help="local rank")
+
     ## nn parameters
     parser.add_argument('--batch_size', type=int, default=16, help="batch size")
     parser.add_argument('--hidden_size', type=int, default=768, help="hidden size")

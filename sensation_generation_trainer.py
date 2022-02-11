@@ -1,10 +1,10 @@
 import torch
 from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer
 
-from utils.config import USE_CUDA, get_args
+from dutils.config import USE_CUDA, get_args
 from models.losses import get_rl_loss
 from models.sensation_scorer import PersuasivenessClassifier
-from utils.data_utils import prepare_data_seq
+from dutils.data_utils import prepare_data_seq
 
 
 class CustomTrainer(Trainer):
