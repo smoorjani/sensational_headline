@@ -23,10 +23,13 @@ class PersuasivenessClassifier(nn.Module):
         output = self.softmax(output)
         return torch.max(output)
 
-def get_reward(decoded_sents, target_sents, sensation_model, tokenizer):
+def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=None):
     '''
     Gets R_sen
     '''
+
+    if device is None:
+        device = "cuda"
 
     joined_decoded_sents = [' '.join(sent) for sent in decoded_sents]
     sents = [pred + ' [SEP] ' + target for pred,
@@ -35,7 +38,7 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer):
         sents, return_tensors='pt', padding=True)['input_ids']
 
     if USE_CUDA:
-        batch = batch.to('cuda')
+        batch = batch.to(device)
 
     try:
         rewards = sensation_model(batch)
@@ -45,11 +48,11 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer):
         print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
         raise RuntimeError
 
-    rewards = rewards.to('cuda')
     w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list)
                             if len(word_list) else 1 for word_list in decoded_sents])
     if USE_CUDA:
-        w = w.to("cuda")
+        rewards = rewards.to(device)
+        w = w.to(device)
 
     sensation_reward = rewards * w
     return sensation_reward.detach()

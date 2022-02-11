@@ -1,15 +1,21 @@
 import torch
-from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer
+from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, TrainingArguments
 
 from dutils.config import USE_CUDA, get_args
 from models.losses import get_rl_loss
 from models.sensation_scorer import PersuasivenessClassifier
 from dutils.data_utils import prepare_data_seq
 
+from numpy import random
+random.seed(123)
+torch.manual_seed(123)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(123)
+
 
 class CustomTrainer(Trainer):
-    def __init__(self, model, tokenizer, train_dataloader, eval_dataloader, custom_args, sensation_model, classifier_tokenizer):
-        super(CustomTrainer, self).__init__(model=model, tokenizer=tokenizer)
+    def __init__(self, args, model, tokenizer, train_dataloader, eval_dataloader, custom_args, sensation_model, classifier_tokenizer):
+        super(CustomTrainer, self).__init__(args=args, model=model, tokenizer=tokenizer)
         self.custom_args = custom_args
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
@@ -84,6 +90,13 @@ class CustomTrainer(Trainer):
 if __name__ == "__main__":
     custom_args = get_args()
 
+    training_args = TrainingArguments("test_trainer", 
+                                      per_device_train_batch_size=1,
+                                      num_train_epochs=10,
+                                      deepspeed="ds_config.json")
+    # torch.distributed.init_process_group(backend='nccl')
+    device = torch.device('cuda', custom_args['local_rank'])
+
     print('Loading data...')
     train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
     custom_args['max_q'] = max_q
@@ -101,17 +114,21 @@ if __name__ == "__main__":
 
     print('Loading persuasiveness classifier...')
     sensation_model = PersuasivenessClassifier(bert_tokenizer.pad_token)
-    # sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
+    sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
     # sensation_model.bert.resize_token_embeddings(len(vocab))
 
     # TODO: optimizers, RL and GPT
     # TODO: saving and loading
 
     if USE_CUDA:
-        sensation_model = sensation_model.to("cuda")
-        decoder = decoder.to("cuda")
+        sensation_model = sensation_model.to(device)
+        decoder = decoder.to(device)
+    
+    # decoder = torch.nn.parallel.DistributedDataParallel(decoder, device_ids=[custom_args['local_rank']], output_device=custom_args['local_rank'])
+    # sensation_model = torch.nn.parallel.DistributedDataParallel(sensation_model, device_ids=[custom_args['local_rank']], output_device=custom_args['local_rank'])
 
     trainer = CustomTrainer(
+        args=training_args,
         model=decoder,
         tokenizer=tokenizer,
         train_dataloader=train_dataloader,

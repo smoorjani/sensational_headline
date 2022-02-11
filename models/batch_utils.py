@@ -1,17 +1,12 @@
 from transformers.generation_logits_process import LogitsProcessorList
 import torch
 
-from numpy import random
 from dutils.masked_cross_entropy import sequence_mask
-
 from dutils.config import *
 
-random.seed(123)
-torch.manual_seed(123)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
-
-def init_batch(tokenizer, batch, individual_tokenization=False):
+def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
+    if device is None:
+        device = "cuda"
     texts = batch['input_txt']
     target_texts = batch['target_txt']
 
@@ -23,10 +18,10 @@ def init_batch(tokenizer, batch, individual_tokenization=False):
                     for target in target_texts]
 
         if USE_CUDA:
-            inputs = [{key: item.to('cuda')
+            inputs = [{key: item.to(device)
                         for key, item in inp.items()} for inp in inputs]
             inputs = [
-                {key: item.to('cuda') for key, item in target.items()} for target in targets]
+                {key: item.to(device) for key, item in target.items()} for target in targets]
 
         batch_size = len(inputs)
     else:
@@ -38,9 +33,9 @@ def init_batch(tokenizer, batch, individual_tokenization=False):
             target_texts, return_tensors="pt", padding=True)
 
         if USE_CUDA:
-            inputs = {key: item.to('cuda')
+            inputs = {key: item.to(device)
                         for key, item in inputs.items()}
-            targets = {key: item.to('cuda')
+            targets = {key: item.to(device)
                         for key, item in targets.items()}
 
         batch_size = inputs['input_ids'].shape[0]
@@ -93,12 +88,14 @@ def decoded_batch_to_txt(tokenizer, all_targets):
         hyp.append([tokenizer.decode(t[i]) for t in all_targets])
     return hyp
 
-def decode_batch(decoder, tokenizer, batch):
+def decode_batch(decoder, tokenizer, batch, device):
+    if device is None:
+        device = "cuda"
 
     decoder.train(False)
-    inputs, _, _ = init_batch(batch, individual_tokenization=True)
+    inputs, _, _ = init_batch(batch, individual_tokenization=True, device=device)
     if USE_CUDA:
-        inputs = [{key: item.to('cuda')
+        inputs = [{key: item.to(device)
                     for key, item in inp.items()} for inp in inputs]
 
     outputs = [decoder.generate(

@@ -6,12 +6,13 @@ from models.sensation_scorer import get_reward
 from dutils.config import *
 
 def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score):
-    inputs, _, batch_size = init_batch(tokenizer, batch)
+    device = torch.device('cuda', args['local_rank'])
+    inputs, _, batch_size = init_batch(tokenizer, batch, device=device)
 
     step_mask = Variable(torch.ones(batch_size)).float()
     
     if USE_CUDA:
-        step_mask = step_mask.to("cuda")
+        step_mask = step_mask.to(device)
 
     all_step_mask = []
     all_targets = []
@@ -20,6 +21,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 
     # in len of maximum size of headlines
     for di in range(args["max_r"]):
+        print(f'loop: {di}\n{torch.cuda.memory_summary(device=0)}\n{torch.cuda.memory_summary(device=1)}\n')
         inputs, outputs, final_dist = run_decoder(decoder, tokenizer, inputs)
         # do this to avoid negatives being fed into multinomial
         final_dist = final_dist.softmax(dim=1)
@@ -48,7 +50,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
     dec_lens_var = torch.sum(all_step_mask, dim=1)
     decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
     total_reward = get_reward(
-        classifier_tokenizer, decoded_sents, batch, sensation_model)
+        classifier_tokenizer, decoded_sents, batch, sensation_model, device)
     total_reward = total_reward.unsqueeze(1)
 
     # getting (R - \hat{R}_t)
@@ -77,10 +79,11 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 def get_loss(args, decoder, tokenizer, batch, use_s_score=False):
     # calculates MLE loss
     # seems like target and dec batches are the same
+    device = torch.device('cuda', args['local_rank'])
     _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
         batch)
 
-    inputs, targets, _ = init_batch(tokenizer, batch)
+    inputs, targets, _ = init_batch(tokenizer, batch, device=device)
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
@@ -108,10 +111,11 @@ def get_loss(args, decoder, tokenizer, batch, use_s_score=False):
     return loss
 
 def get_prob(args, decoder, tokenizer, batch):
+    device = torch.device('cuda', args['local_rank'])
     _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
         batch)
 
-    inputs, targets, _ = init_batch(tokenizer, batch)
+    inputs, targets, _ = init_batch(tokenizer, batch, device=device)
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
