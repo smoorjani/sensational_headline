@@ -21,7 +21,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 
     # in len of maximum size of headlines
     for di in range(args["max_r"]):
-        print(f'loop: {di}\n{torch.cuda.memory_summary(device=0)}\n{torch.cuda.memory_summary(device=1)}\n')
+        # print(f'loop: {di}\n{torch.cuda.memory_summary(device=0)}\n{torch.cuda.memory_summary(device=1)}\n')
         inputs, outputs, final_dist = run_decoder(decoder, tokenizer, inputs)
         # do this to avoid negatives being fed into multinomial
         final_dist = final_dist.softmax(dim=1)

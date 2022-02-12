@@ -13,3 +13,6 @@ vocab.txt
 *.pt
 *.pth
 *.th
+
+test_trainer/
+tmp_trainer/

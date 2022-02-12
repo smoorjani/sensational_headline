@@ -21,7 +21,7 @@ def get_args():
     parser.add_argument("--use_rl", type=bool, default=True, help="use rl or not")
     parser.add_argument("--rl_lr", type=float, default=0.001, help="learning rate of rl")
 
-    parser.add_argument('--persuasivness_clasifier_path', type=str, default="persuasive_model.pt", help="load existing persuasiveness model") 
+    parser.add_argument('--persuasivness_clasifier_path', type=str, default="persuasive_model.pth", help="load existing persuasiveness model") 
     parser.add_argument('--training_data', type=str, default="persuasive_pairs_data_train.txt", help="training data") 
     parser.add_argument('--eval_data', type=str, default="persuasive_pairs_data_test.txt", help="eval data") 
     
