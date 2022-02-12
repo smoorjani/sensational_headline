@@ -5,19 +5,15 @@ from transformers import BertModel
 from dutils.config import *
 
 class PersuasivenessClassifier(nn.Module):
-    def __init__(self, PAD_token, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
+    def __init__(self, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
         super(PersuasivenessClassifier, self).__init__()
-        self.PAD_token = PAD_token
         self.bert = BertModel.from_pretrained(model_name)
         self.dropout = nn.Dropout(p=dropout)
         self.linear = nn.Linear(hidden_dim, n_classes)
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, input_batch):
-        padding_mask = ~(input_batch == self.PAD_token)
-        token_type_ids = torch.zeros_like(input_batch)
-        outputs = self.bert(input_batch, attention_mask=padding_mask,
-                            token_type_ids=token_type_ids)
+        outputs = self.bert(**input_batch)
         output = self.dropout(outputs.pooler_output)
         output = self.linear(output)
         output = self.softmax(output)
@@ -35,10 +31,10 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=N
     sents = [pred + ' [SEP] ' + target for pred,
                 target in zip(joined_decoded_sents, target_sents)]
     batch = tokenizer(
-        sents, return_tensors='pt', padding=True)['input_ids']
+        sents, return_tensors='pt', padding=True)
 
     if USE_CUDA:
-        batch = batch.to(device)
+        batch = {key: item.to(device) for key, item in batch.items()}
 
     try:
         rewards = sensation_model(batch)

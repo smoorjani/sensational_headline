@@ -8,7 +8,6 @@ from dutils.config import USE_CUDA, get_args
 from models.losses import get_rl_loss
 from models.sensation_scorer import PersuasivenessClassifier
 from dutils.data_utils import prepare_data_seq
-from dutils.parallel import DataParallelModel
 
 from numpy import random
 random.seed(123)
@@ -27,6 +26,9 @@ class CustomTrainer(Trainer):
         self.sensation_model = sensation_model
         self.expected_reward_layer = torch.nn.Linear(
             custom_args["hidden_size"], 1)
+
+        if USE_CUDA:
+            self.expected_reward_layer.to(torch.device('cuda', custom_args['local_rank']))
 
         self.classifier_tokenizer = classifier_tokenizer
 
@@ -77,6 +79,7 @@ class CustomTrainer(Trainer):
             expected_reward_loss.backward()
 
         self.expected_rewards_loss += expected_reward_loss.data
+        print(loss, expected_reward_loss)
 
         return loss.detach()
 
@@ -94,19 +97,26 @@ class CustomTrainer(Trainer):
 if __name__ == "__main__":
     custom_args = get_args()
 
+    sensation_model = PersuasivenessClassifier()
+    sd = torch.load(custom_args['persuasivness_clasifier_path'])['state_dict']
+    state_dict = {key.replace('module.','') : value for key, value in sd.items()}
+    sensation_model.load_state_dict(state_dict)
+
+
     training_args = TrainingArguments("test_trainer", 
                                       per_device_train_batch_size=1,
                                       num_train_epochs=10,
-                                      deepspeed="ds_config.json",
+                                      deepspeed=custom_args['ds_config'],
                                       fp16=True
                                     )
-    # torch.distributed.init_process_group(backend='nccl')
+    
     device = torch.device('cuda', custom_args['local_rank'])
 
     print('Loading data...')
     train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
     custom_args['max_q'] = max_q
-    custom_args['max_r'] = 120
+    # setting max decoding length
+    custom_args['max_r'] = 60
 
     print('Loading gpt model...')
     config = GPT2Config.from_pretrained(
@@ -117,11 +127,6 @@ if __name__ == "__main__":
     tokenizer.pad_token = tokenizer.eos_token
     config.pad_token_id = config.eos_token_id
     decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
-
-    print('Loading persuasiveness classifier...')
-    sensation_model = PersuasivenessClassifier(bert_tokenizer.pad_token)
-    # sensation_model.load_state_dict(torch.load(custom_args['persuasivness_clasifier_path']))
-    # sensation_model.bert.resize_token_embeddings(len(vocab))
 
     # TODO: optimizers, RL and GPT
     optimizer = torch.optim.Adam(params=decoder.parameters(), lr=training_args.learning_rate)
@@ -137,9 +142,10 @@ if __name__ == "__main__":
         sensation_model = sensation_model.to(device)
         decoder = decoder.to(device)
     
-    ds_config = './ds_config.json'
-    dschf = HfDeepSpeedConfig(ds_config)
-    engine = deepspeed.initialize(model=decoder, config_params=ds_config, optimizer=optimizer)
+    
+    dschf = HfDeepSpeedConfig(custom_args['ds_config'])
+    engine, optimizer, training_dataloader, lr_scheduler = deepspeed.initialize(model=decoder, config_params=custom_args['ds_config'], optimizer=optimizer)
+    # torch.distributed.init_process_group(backend='nccl')
     # decoder = DataParallelModel(decoder, device_ids=[0,1])
     # decoder = torch.nn.parallel.DistributedDataParallel(decoder, device_ids=[custom_args['local_rank']], output_device=custom_args['local_rank'])
     # sensation_model = torch.nn.parallel.DistributedDataParallel(sensation_model, device_ids=[custom_args['local_rank']], output_device=custom_args['local_rank'])

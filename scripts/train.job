@@ -1,0 +1,10 @@
+#!/bin/bash
+
+#SBATCH -p GPU-shared
+#SBATCH -t 2:00:00
+#SBATCH -N 1
+#SBATCH --gpus=v100-32:2
+
+source env/bin/activate
+cd sensational_headline
+deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2

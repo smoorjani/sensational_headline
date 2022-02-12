@@ -28,7 +28,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
         target = torch.multinomial(
             final_dist.data, 1).long().squeeze()  # sampling
         all_targets.append(target.detach())
-        output1 = outputs['hidden_states'][-1][:, -1, :]
+        output1 = outputs['hidden_states'][-1][:, -1, :].to(device).float()
         # this is some hidden state (batch * hidden_dim) -> o_t
         all_output1.append(output1)
         # gold_probs = final_dist[:, target]
@@ -50,7 +50,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
     dec_lens_var = torch.sum(all_step_mask, dim=1)
     decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
     total_reward = get_reward(
-        classifier_tokenizer, decoded_sents, batch, sensation_model, device)
+        decoded_sents, batch['target_txt'], sensation_model, classifier_tokenizer, device)
     total_reward = total_reward.unsqueeze(1)
 
     # getting (R - \hat{R}_t)

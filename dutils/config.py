@@ -10,7 +10,8 @@ def get_args():
     parser.add_argument("--use_s_score", type=int, default=1, help="whether use sensation score or not in the rl training")
     parser.add_argument("--thd", type=float, default=0.1, help="thredhold for training")
 
-    # seq2seq parameters
+    # deepspeed parameters
+    parser.add_argument('--ds_config', type=str, default="ds_config_stage2.json", help="Deepspeed config file")
     parser.add_argument('--local_rank', type=int, default=0, help="local rank")
 
     ## nn parameters

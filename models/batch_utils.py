@@ -69,16 +69,17 @@ def run_decoder(decoder, tokenizer, inputs):
 def get_output_from_batch(batch):
 
     dec_batch = batch["target_batch"].transpose(0, 1)
-    target_batch = batch["target_ext_vocab_batch"].transpose(0, 1)
+    # target_batch = batch["target_ext_vocab_batch"].transpose(0, 1)
     dec_lens_var = batch["target_lengths"]
     max_dec_len = max(dec_lens_var)
 
-    assert max_dec_len == target_batch.size(1)
+    assert max_dec_len == dec_batch.size(1)
 
     dec_padding_mask = sequence_mask(
         dec_lens_var, max_len=max_dec_len).float()
 
-    return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
+    # return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
+    return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, dec_batch
 
 def decoded_batch_to_txt(tokenizer, all_targets):
 
