@@ -33,7 +33,8 @@ def get_args():
     parser.add_argument('-total_steps', type=int, default=100000000, help="total steps for training")
     parser.add_argument('-optimizer', type=str, default="adam", help="which optimizer to use")
     parser.add_argument('-max_grad_norm', type=float, default=2.0, help="max grad norm")
-    parser.add_argument('-eps', type=float, default=1e-12, help="epison to avoid 0 probs")
+    # TODO: what to do about this - especially in regards to get_loss
+    parser.add_argument('-eps', type=float, default=1e-8, help="epison to avoid 0 probs")
 
     ## other args
     args = vars(parser.parse_args())

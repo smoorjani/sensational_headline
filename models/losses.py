@@ -73,7 +73,6 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 
     rewards_loss = torch.sum(
         (total_reward - baseline_rewards) ** 2 * all_step_mask) / torch.sum(all_step_mask)
-
     return total_reward.mean(), loss, rewards_loss
 
 def get_loss(args, decoder, tokenizer, batch, use_s_score=False):
@@ -89,10 +88,10 @@ def get_loss(args, decoder, tokenizer, batch, use_s_score=False):
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
         inputs, _, final_dist = run_decoder(decoder, tokenizer, inputs)
         target = target_batch[:, di]
+        final_dist = final_dist.softmax(dim=1)
         gold_probs = torch.gather(
             final_dist, 1, target.unsqueeze(1)).squeeze()
         step_loss = -torch.log(gold_probs + args["eps"])
-        
         step_mask = dec_padding_mask[:, di]
         step_loss = step_loss * step_mask
         step_losses.append(step_loss)
