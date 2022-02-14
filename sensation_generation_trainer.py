@@ -42,6 +42,7 @@ class CustomTrainer(Trainer):
 
     def training_step(self, model, inputs):
         model.train()
+        torch.cuda.empty_cache()
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
@@ -106,6 +107,7 @@ if __name__ == "__main__":
     training_args = TrainingArguments("test_trainer", 
                                       per_device_train_batch_size=1,
                                       num_train_epochs=10,
+                                      max_steps=100000,
                                       deepspeed=custom_args['ds_config'],
                                       fp16=True
                                     )

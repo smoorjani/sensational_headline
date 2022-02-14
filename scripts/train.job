@@ -8,3 +8,4 @@
 source env/bin/activate
 cd sensational_headline
 deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5
+# deepspeed --num_gpus=4 sensation_generation_trainer.py --batch_size 4 -eps 1e-5
