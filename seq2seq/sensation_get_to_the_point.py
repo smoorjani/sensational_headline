@@ -322,7 +322,9 @@ class PointerAttnSeqToSeq(nn.Module):
             self.decoder = self.decoder.cuda()
             self.embedding = self.embedding.cuda()
             self.reduce_state = self.reduce_state.cuda()
-        print(f'gpt model on {self.decoder.device}')
+
+        self.decoder = torch.nn.DataParallel(self.decoder, device_ids=[0,1])
+        print(f'gpt model on {self.decoder.module.device}')
 
     def get_encode_states(self, batch):
         # NEVER USED
@@ -491,8 +493,9 @@ class PointerAttnSeqToSeq(nn.Module):
             targets = [self.tokenizer(target, return_tensors="pt") for target in target_texts]
 
             if USE_CUDA:
-                inputs = [{key: item.cuda() for key, item in inp.items()} for inp in inputs]
-                inputs = [{key: item.cuda() for key, item in target.items()} for target in targets]
+                # inputs = [{key: item.cuda() for key, item in inp.items()} for inp in inputs]
+                # inputs = [{key: item.cuda() for key, item in target.items()} for target in targets]
+                print('WARNING: Inputs not placed on GPU')
 
             batch_size = len(inputs)
         else:
@@ -503,8 +506,9 @@ class PointerAttnSeqToSeq(nn.Module):
             targets = self.tokenizer(target_texts, return_tensors="pt", padding=True)
 
             if USE_CUDA:
-                inputs = {key: item.cuda() for key, item in inputs.items()}
-                targets = {key: item.cuda() for key, item in targets.items()}
+                # inputs = {key: item.cuda() for key, item in inputs.items()}
+                # targets = {key: item.cuda() for key, item in targets.items()}
+                print('WARNING: Inputs not placed on GPU')
 
             batch_size = inputs['input_ids'].shape[0]
 
@@ -533,8 +537,9 @@ class PointerAttnSeqToSeq(nn.Module):
         #     except:
         #         pass
         # print(f'Storage requirements: {total_memory}')
+        print('chkpt1\n', torch.cuda.memory_summary(), '\n')
         outputs = self.decoder(**inputs)
-        # print('chkpt2\n', torch.cuda.memory_summary(), '\n')
+        print('chkpt2\n', torch.cuda.memory_summary(), '\n')
 
         # get next token
         final_dist = outputs.logits[:, -1, :]
@@ -891,21 +896,21 @@ class PointerAttnSeqToSeq(nn.Module):
     def decode_batch(self, batch, decode_type):
 
         self.encoder.train(False)
-        self.decoder.train(False)
+        self.decoder.module.train(False)
 
         assert decode_type == "beam"
         inputs, _, _ = self.init_batch(batch, individual_tokenization=True)
         if USE_CUDA:
             inputs = [{key: item.cuda() for key, item in inp.items()} for inp in inputs]
 
-        outputs = [self.decoder.generate(**inp, num_beams=5, max_length=256) for inp in inputs]
+        outputs = [self.decoder.module.generate(**inp, num_beams=5, max_length=256) for inp in inputs]
         # print(outputs[0], type(outputs[0]))
         decoded_sents = [self.tokenizer.decode(output[0]) for output in outputs]
         # beam_sh = BeamSearch(self, self.args, self.lang)
         # decoded_sents = beam_sh.beam_search(batch)
 
         self.encoder.train(True)
-        self.decoder.train(True)
+        self.decoder.module.train(True)
 
         return decoded_sents
 

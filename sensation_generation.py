@@ -14,6 +14,8 @@ import sys
 
 import deepspeed
 from transformers.deepspeed import HfDeepSpeedConfig
+from accelerate import Accelerator, DeepSpeedPlugin
+from accelerate.deepspeed_utils import DeepSpeedEngineWrapper
 
 def toggle_grad(model, require_grads=False):
     for param in model.parameters():
@@ -122,7 +124,7 @@ class Trainer(object):
     def __init__(self):
 
         args = NNParams().args
-        # args['batch_size'] = 4
+        args['batch_size'] = 2
         # tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         # lang = Lang(list(tokenizer.encoder.keys()))
         with open("vocab.txt", "r") as f:
@@ -155,8 +157,9 @@ class Trainer(object):
         model = PointerAttnSeqToSeq(self.args, lang)
         self.model = model
         if USE_CUDA:
-            self.model = self.model.cuda()
-            print('Gen model is on: ', next(self.model.parameters()).device)
+            # self.model = self.model.cuda()
+            # print('Gen model is on: ', next(self.model.parameters()).device)
+            print('WARNING: Gen model is not being moved onto CUDA for accelerator.')
 
         logging.info(model)
         logging.info("encoder parameters: {}".format(count_parameters(model.encoder)))
@@ -175,14 +178,14 @@ class Trainer(object):
         print('Loading sensation model...')
         self.sensation_model = PersuasivenessClassifier(self.lang)
         # sys.path.insert(0, '../persuasive_classifier/models')
-        self.sensation_model.load_state_dict(torch.load("persuasive_model.pt"))
+        # self.sensation_model.load_state_dict(torch.load("../persuasiveness_classifier/persuasive_model.pth"))
         self.sensation_model.bert.resize_token_embeddings(len(vocab))
         toggle_grad(self.sensation_model, False)
     
 
 
         if USE_CUDA:
-            self.sensation_model.to('cuda:1')
+            self.sensation_model.to('cuda')
             # self.sensation_model.cuda()
             print('Sensation model is on: ', next(self.sensation_model.parameters()).device)
 
@@ -193,9 +196,14 @@ class Trainer(object):
         else:
             raise ValueError("optimizer not implemented")
 
-        ds_config = './ds_config.json'
-        dschf = HfDeepSpeedConfig(ds_config)
-        self.engine = deepspeed.initialize(model=self.model, config_params=ds_config, optimizer=self.optimizer)
+        # ds_config = './ds_config.json'
+        # dschf = HfDeepSpeedConfig(ds_config)
+        # self.engine = deepspeed.initialize(model=self.model, config_params=ds_config, optimizer=self.optimizer)
+        # self.model = torch.nn.DataParallel(self.model, device_ids=[0, 1])
+
+        self.deepspeed_plugin = DeepSpeedPlugin(zero_stage=2, gradient_accumulation_steps=2)
+        self.accelerator = Accelerator(fp16=True, deepspeed_plugin=self.deepspeed_plugin)
+        self.model, self.optimizer, self.train = self.accelerator.prepare(self.model, self.optimizer, self.train)
 
     def save_model(self, save_name, best_result, step):
         directory = "sensation_save/" + save_name + "/"
@@ -261,13 +269,23 @@ class Trainer(object):
             # r, loss, acc, expected_rewards_loss, _ = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
             # r, rl_loss, ml_loss, expected_rewards_loss, _ = self.model.get_losses(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
             print('Starting RL loss...')
-            total_reward, rl_loss, _, rewards_loss, probs = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
-            rl_loss.backward()
+            if isinstance(self.model, torch.nn.DataParallel) or isinstance(self.model, DeepSpeedEngineWrapper):
+               total_reward, rl_loss, _, rewards_loss, probs = self.model.module.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            else:
+                total_reward, rl_loss, _, rewards_loss, probs = self.model.get_rl_loss(batch, self.sensation_model, use_s_score=self.args["use_s_score"])
+            
+            # rl_loss.backward()
+            self.accelerator.backward(rl_loss)
             print('Finished RL loss...')
             torch.cuda.empty_cache()
             print('Starting MLE loss...')
-            _, ml_loss, _ = self.model.get_loss(batch, use_s_score=self.args["use_s_score"])
-            ml_loss.backward()
+            if isinstance(self.model, torch.nn.DataParallel) or isinstance(self.model, DeepSpeedEngineWrapper):
+               _, ml_loss, _ = self.model.module.get_loss(batch, use_s_score=self.args["use_s_score"])
+            else:
+                _, ml_loss, _ = self.model.get_loss(batch, use_s_score=self.args["use_s_score"])
+            
+            # ml_loss.backward()
+            self.accelerator.backward(ml_loss)
         else:
             _, loss, acc = self.model.get_loss(batch)
 
@@ -320,7 +338,7 @@ class Trainer(object):
                 self.rl_optimizer = torch.optim.Adam(self.model.expected_reward_layer.parameters(), lr=self.args["rl_lr"])
         else:
             pass
-        self.old_model = copy.deepcopy(self.model) 
+        # self.old_model = copy.deepcopy(self.model) 
         total_steps = self.args["total_steps"]
         while step < total_steps:
             for j, batch in enumerate(self.train):
@@ -347,7 +365,7 @@ class Trainer(object):
                     #     self.save_decode_sents(self.test, save_folder+"/prediction_step_{}.txt".format(step))
 
                     hyp, ref = self.model.predict_batch(batch, self.args["decode_type"])
-                    old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
+                    # old_hyp, _ = self.old_model.predict_batch(batch, self.args["decode_type"])
                     decoded_sents = self.model.decode_batch(batch,"beam")
                     print(f'Original: {batch["input_txt"]}\n Decoded: {decoded_sents}')
                     sensation_rewards = self.model.get_sensation_reward(decoded_sents, batch, self.sensation_model)
