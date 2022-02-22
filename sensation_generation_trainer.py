@@ -26,6 +26,7 @@ class CustomTrainer(Trainer):
         self.sensation_model = sensation_model
         self.expected_reward_layer = torch.nn.Linear(
             custom_args["hidden_size"], 1)
+        self.rl_optimizer = torch.optim.Adam(self.expected_reward_layer.parameters(), lr=custom_args["rl_lr"])
 
         if USE_CUDA:
             self.expected_reward_layer.to(torch.device('cuda', custom_args['local_rank']))
@@ -42,7 +43,6 @@ class CustomTrainer(Trainer):
 
     def training_step(self, model, inputs):
         model.train()
-        torch.cuda.empty_cache()
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
@@ -79,9 +79,13 @@ class CustomTrainer(Trainer):
             loss.backward()
             expected_reward_loss.backward()
 
+        self.rl_optimizer.zero_grad()
+        torch.nn.utils.clip_grad_norm(model.parameters(), self.custom_args["max_grad_norm"])
+        expected_reward_loss = expected_reward_loss.detach()
+
+        self.rl_optimizer.step()
         self.expected_rewards_loss += expected_reward_loss.data
         print(loss, expected_reward_loss)
-
         return loss.detach()
 
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -104,21 +108,22 @@ if __name__ == "__main__":
     sensation_model.load_state_dict(state_dict)
 
 
-    training_args = TrainingArguments("test_trainer", 
+    training_args = TrainingArguments("/ocean/projects/cis210020p/moorjani/sensational_headline/test_trainer", 
                                       per_device_train_batch_size=1,
+                                    #   gradient_accumulation_steps=8,
                                       num_train_epochs=10,
                                       max_steps=100000,
                                       deepspeed=custom_args['ds_config'],
                                       fp16=True
                                     )
-    
+    # print(training_args)
     device = torch.device('cuda', custom_args['local_rank'])
 
     print('Loading data...')
     train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
     custom_args['max_q'] = max_q
     # setting max decoding length
-    custom_args['max_r'] = 60
+    custom_args['max_r'] = 40
 
     print('Loading gpt model...')
     config = GPT2Config.from_pretrained(
@@ -163,6 +168,6 @@ if __name__ == "__main__":
         sensation_model=sensation_model,
         classifier_tokenizer=bert_tokenizer,
     )
-
+    torch.cuda.empty_cache()
     train_result = trainer.train()
     trainer.save_model()

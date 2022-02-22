@@ -35,8 +35,9 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
         gold_probs = torch.gather(
             final_dist, 1, target.unsqueeze(1)).squeeze()
         step_loss = -torch.log(gold_probs + args["eps"])
-
+        
         step_loss = step_loss * step_mask
+        # print(f'gold_probs {gold_probs.data}\nstep_loss {step_loss.data}\nstep_mask {step_mask.data}\n')
         all_step_mask.append(step_mask)
         step_losses.append(step_loss)
         step_mask = torch.clamp(
@@ -48,23 +49,30 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
     baseline_rewards = torch.cat(baseline_rewards, dim=1)
     all_step_mask = torch.stack(all_step_mask, dim=1).float()
     dec_lens_var = torch.sum(all_step_mask, dim=1)
+    
     decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
     total_reward = get_reward(
         decoded_sents, batch['target_txt'], sensation_model, classifier_tokenizer, device)
     total_reward = total_reward.unsqueeze(1)
-
+    
     # getting (R - \hat{R}_t)
     # torch.Size([batch, 1]) torch.Size([batch, max_r])
+    # print(f'total_reward {total_reward}\nbaseline_reward {baseline_rewards}')
+    baseline_rewards = torch.nn.functional.softmax(baseline_rewards, dim=1)
     reward = total_reward.detach() - baseline_rewards.detach()
     sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
+    # print(f'sensation {(1 - batch["sensation_scores"])}')
+    # print(f'reward: {reward}\nsum: {torch.sum(torch.stack(step_losses, 1), 1)}\nsum_losses {sum_losses}\ndec_lens_var {dec_lens_var}')
     # this is for ARL
     if use_s_score:
         batch_avg_loss = sum_losses / \
             dec_lens_var.float()*(1 - batch["sensation_scores"])
     else:
         batch_avg_loss = sum_losses/dec_lens_var.float()
+    # print(batch_avg_loss)
     rl_loss = torch.mean(batch_avg_loss)
     ml_loss = get_loss(args, decoder, tokenizer, batch, use_s_score=use_s_score)
+    print(f'rl_loss: {rl_loss}, ml_loss: {ml_loss}')
     if use_s_score:
         loss = rl_loss + ml_loss
     else:

@@ -43,7 +43,7 @@ def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
     # this ensures it doesn't interfere with teacher forcing
     return inputs, targets, batch_size
 
-def run_decoder(decoder, tokenizer, inputs):
+def run_decoder(decoder, tokenizer, inputs, limit=64):
     attention_mask = inputs['attention_mask']
     outputs = decoder(**inputs)
 
@@ -63,7 +63,11 @@ def run_decoder(decoder, tokenizer, inputs):
     attention_mask = torch.cat(
         (attention_mask, generated_attention_mask), dim=1)
 
-    inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
+    if limit:
+        # sliding window over hidden states
+        inputs = {'input_ids': input_ids[:, -limit:], 'attention_mask': attention_mask[:, -limit:]}
+    else:
+        inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
     return inputs, outputs, final_dist
 
 def get_output_from_batch(batch):

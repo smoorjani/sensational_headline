@@ -49,6 +49,5 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=N
     if USE_CUDA:
         rewards = rewards.to(device)
         w = w.to(device)
-
     sensation_reward = rewards * w
     return sensation_reward.detach()
