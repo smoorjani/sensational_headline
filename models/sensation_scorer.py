@@ -4,21 +4,6 @@ from transformers import BertModel
 
 from dutils.config import *
 
-class PersuasivenessClassifier(nn.Module):
-    def __init__(self, model_name='bert-base-uncased', hidden_dim=768, dropout=0.2, n_classes=2):
-        super(PersuasivenessClassifier, self).__init__()
-        self.bert = BertModel.from_pretrained(model_name)
-        self.dropout = nn.Dropout(p=dropout)
-        self.linear = nn.Linear(hidden_dim, n_classes)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, input_batch):
-        outputs = self.bert(**input_batch)
-        output = self.dropout(outputs.pooler_output)
-        output = self.linear(output)
-        output = self.softmax(output)
-        return torch.max(output)
-
 def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=None):
     '''
     Gets R_sen
@@ -32,6 +17,14 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=N
                 target in zip(joined_decoded_sents, target_sents)]
     batch = tokenizer(
         sents, return_tensors='pt', padding=True)
+    
+    if batch['input_ids'].shape[-1] > 512:
+        for key, item in batch.items():
+            batch_size, tokens = item.shape
+            new_item = torch.zeros(batch_size, 512)
+            new_item = item[:, (tokens-512):]
+            batch[key] = new_item
+
 
     if USE_CUDA:
         batch = {key: item.to(device) for key, item in batch.items()}

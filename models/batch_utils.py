@@ -43,10 +43,12 @@ def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
     # this ensures it doesn't interfere with teacher forcing
     return inputs, targets, batch_size
 
-def run_decoder(decoder, tokenizer, inputs, limit=64):
+def run_decoder(decoder, tokenizer, inputs, limit=64, labels=None):
     attention_mask = inputs['attention_mask']
-    outputs = decoder(**inputs)
-
+    if labels == None:
+        outputs = decoder(**inputs)
+    else:
+        outputs = decoder(**inputs, labels=labels)
     # get next token
     final_dist = outputs.logits[:, -1, :]
     logits_processor = LogitsProcessorList()
@@ -68,7 +70,9 @@ def run_decoder(decoder, tokenizer, inputs, limit=64):
         inputs = {'input_ids': input_ids[:, -limit:], 'attention_mask': attention_mask[:, -limit:]}
     else:
         inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
-    return inputs, outputs, final_dist
+
+    loss = outputs.loss if labels is not None else 0
+    return inputs, outputs, final_dist, loss
 
 def get_output_from_batch(batch):
 

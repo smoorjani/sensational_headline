@@ -1,12 +1,12 @@
 import torch
-from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, TrainingArguments, get_scheduler
+from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, TrainingArguments, get_scheduler, AutoTokenizer, AutoModelWithLMHead, AutoConfig
 
 import deepspeed
 from transformers.deepspeed import HfDeepSpeedConfig
 
 from dutils.config import USE_CUDA, get_args
 from models.losses import get_rl_loss
-from models.sensation_scorer import PersuasivenessClassifier
+from models.models import PersuasivenessClassifier
 from dutils.data_utils import prepare_data_seq
 
 from numpy import random
@@ -47,8 +47,9 @@ class CustomTrainer(Trainer):
 
         with self.autocast_smart_context_manager():
             # loss = self.compute_loss(model, inputs)
-            _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-                                                        self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
+            # _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
+            #                                             self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
+            loss = get_loss(self.custom_args, inputs, model, self.tokenizer, use_s_score=self.custom_args["use_s_score"])
 
         if self.args.n_gpu > 1:
             loss = loss.mean()
@@ -101,14 +102,19 @@ class CustomTrainer(Trainer):
 
 if __name__ == "__main__":
     custom_args = get_args()
+    # custom_args['generator'] = "/expanse/lustre/projects/uic333/smoorjani/progressive_generation/training_logs/gpt2_cnn_fullwords"
+    custom_args['generator'] = 'ktrapeznikov/gpt2-medium-topic-news'
+    custom_args['hidden_size'] = 1024
+    custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/persuasive_model1.pth"
 
     sensation_model = PersuasivenessClassifier()
-    sd = torch.load(custom_args['persuasivness_clasifier_path'])['state_dict']
-    state_dict = {key.replace('module.','') : value for key, value in sd.items()}
-    sensation_model.load_state_dict(state_dict)
+    # sd = torch.load(custom_args['persuasivness_clasifier_path'])['state_dict']
+    # state_dict = {key.replace('module.','') : value for key, value in sd.items()}
+    # sensation_model.load_state_dict(state_dict)
+    sensation_model = torch.load(custom_args['persuasivness_clasifier_path'])
 
 
-    training_args = TrainingArguments("/ocean/projects/cis210020p/moorjani/sensational_headline/test_trainer", 
+    training_args = TrainingArguments("/expanse/lustre/projects/uic333/smoorjani/sensational_headline/test_trainer", 
                                       per_device_train_batch_size=1,
                                     #   gradient_accumulation_steps=8,
                                       num_train_epochs=10,
@@ -126,14 +132,14 @@ if __name__ == "__main__":
     custom_args['max_r'] = 40
 
     print('Loading gpt model...')
-    config = GPT2Config.from_pretrained(
-        "gpt2", output_hidden_states=True, output_attentions=True)
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    config = AutoConfig.from_pretrained(
+        custom_args['generator'], output_hidden_states=True, output_attentions=True)
+    tokenizer = AutoTokenizer.from_pretrained(custom_args['generator'])
     bert_tokenizer = BertTokenizer.from_pretrained(
         "bert-base-uncased")
     tokenizer.pad_token = tokenizer.eos_token
     config.pad_token_id = config.eos_token_id
-    decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
+    decoder = AutoModelWithLMHead.from_pretrained(custom_args['generator'], config=config)
 
     # TODO: optimizers, RL and GPT
     optimizer = torch.optim.Adam(params=decoder.parameters(), lr=training_args.learning_rate)
