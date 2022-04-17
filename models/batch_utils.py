@@ -4,7 +4,16 @@ import torch
 from dutils.masked_cross_entropy import sequence_mask
 from dutils.config import *
 
-def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
+def truncate_tokenized(inputs, max_len):
+    if inputs['input_ids'].shape[-1] > max_len:
+        for key, item in inputs.items():
+            batch_size, tokens = item.shape
+            new_item = torch.zeros(batch_size, max_len)
+            new_item = item[:, :max_len]
+            inputs[key] = new_item
+    return inputs
+
+def init_batch(tokenizer, batch, individual_tokenization=False, device=None, max_len=128):
     if device is None:
         device = "cuda"
     texts = batch['input_txt']
@@ -27,10 +36,12 @@ def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
     else:
         tokenizer.padding_side = "left"
         inputs = tokenizer(texts, return_tensors="pt", padding=True)
+        inputs = truncate_tokenized(inputs, max_len)
 
         tokenizer.padding_side = "right"
         targets = tokenizer(
             target_texts, return_tensors="pt", padding=True)
+        # no need to truncate because of sliding window.
 
         if USE_CUDA:
             inputs = {key: item.to(device)
@@ -39,11 +50,13 @@ def init_batch(tokenizer, batch, individual_tokenization=False, device=None):
                         for key, item in targets.items()}
 
         batch_size = inputs['input_ids'].shape[0]
+
     # padding should stay on the right for targets
     # this ensures it doesn't interfere with teacher forcing
     return inputs, targets, batch_size
 
 def run_decoder(decoder, tokenizer, inputs, limit=64, labels=None):
+    # print(inputs['input_ids'].shape)
     attention_mask = inputs['attention_mask']
     if labels == None:
         outputs = decoder(**inputs)
@@ -53,6 +66,9 @@ def run_decoder(decoder, tokenizer, inputs, limit=64, labels=None):
     final_dist = outputs.logits[:, -1, :]
     logits_processor = LogitsProcessorList()
     next_tokens_scores = logits_processor(inputs['input_ids'], final_dist)
+    # TODO(RL Loss): try sampling
+    # target = torch.multinomial(
+        #     final_dist.data, 1).long().squeeze()  # sampling
     next_tokens = torch.argmax(next_tokens_scores, dim=-1)
 
     # appending next tokens to input_ids
@@ -72,22 +88,21 @@ def run_decoder(decoder, tokenizer, inputs, limit=64, labels=None):
         inputs = {'input_ids': input_ids, 'attention_mask': attention_mask}
 
     loss = outputs.loss if labels is not None else 0
-    return inputs, outputs, final_dist, loss
+    return inputs, outputs, final_dist, next_tokens, loss
 
-def get_output_from_batch(batch):
+def get_output_from_batch(targets):
 
-    dec_batch = batch["target_batch"].transpose(0, 1)
-    # target_batch = batch["target_ext_vocab_batch"].transpose(0, 1)
-    dec_lens_var = batch["target_lengths"]
+    target_batch = targets['input_ids']
+    dec_lens_var = torch.count_nonzero(targets['attention_mask'], dim=1)
     max_dec_len = max(dec_lens_var)
 
-    assert max_dec_len == dec_batch.size(1)
+    assert max_dec_len == target_batch.size(1)
 
     dec_padding_mask = sequence_mask(
         dec_lens_var, max_len=max_dec_len).float()
 
-    # return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
-    return dec_batch, dec_padding_mask, max_dec_len, dec_lens_var, dec_batch
+    #print(target_batch, dec_padding_mask, max_dec_len, dec_lens_var)
+    return target_batch, dec_padding_mask, max_dec_len, dec_lens_var
 
 def decoded_batch_to_txt(tokenizer, all_targets):
 

@@ -1,11 +1,13 @@
 import torch
+import torch.nn as nn
 from torch.autograd import Variable
 
 from models.batch_utils import decoded_batch_to_txt, get_output_from_batch, init_batch, run_decoder
 from models.sensation_scorer import get_reward
 from dutils.config import *
 
-def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score):
+def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score, hidden_size=1024):
+    print('Running RL loss...')
     device = torch.device('cuda', args['local_rank'])
     inputs, _, batch_size = init_batch(tokenizer, batch, device=device)
 
@@ -21,14 +23,13 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 
     # in len of maximum size of headlines
     for di in range(args["max_r"]):
-        # print(f'loop: {di}\n{torch.cuda.memory_summary(device=0)}\n{torch.cuda.memory_summary(device=1)}\n')
-        inputs, outputs, final_dist, _ = run_decoder(decoder, tokenizer, inputs)
+        inputs, outputs, final_dist, target, _ = run_decoder(decoder, tokenizer, inputs)
         # do this to avoid negatives being fed into multinomial
         final_dist = final_dist.softmax(dim=1)
-        target = torch.multinomial(
-            final_dist.data, 1).long().squeeze()  # sampling
+        
         all_targets.append(target.detach())
         output1 = outputs['hidden_states'][-1][:, -1, :].to(device).float()
+        # print(output1.shape)
         # this is some hidden state (batch * hidden_dim) -> o_t
         all_output1.append(output1)
         # gold_probs = final_dist[:, target]
@@ -44,29 +45,42 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
             step_mask - (target == tokenizer.eos_token_id).float(), min=0.0)
 
     # this is the linear layer that calculates \hat{R}_t
-    baseline_rewards = [expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach()
+    # TODO: logistic layer
+    sigmoid = nn.Sigmoid().to(device)
+    baseline_rewards = [sigmoid(expected_reward_layer(output1.detach())) * step_mask.unsqueeze(1).detach()
                         for output1, step_mask in zip(all_output1, all_step_mask)]
+                        # batch size x decoding steps
+    # for i, (output1, step_mask) in enumerate(zip(all_output1, all_step_mask)):
+    #     print(f'Step {i}')
+    #     print(f'Output {output1}\nERL {sigmoid(expected_reward_layer(output1.detach()))}\nStep {step_mask}')
     baseline_rewards = torch.cat(baseline_rewards, dim=1)
     all_step_mask = torch.stack(all_step_mask, dim=1).float()
     dec_lens_var = torch.sum(all_step_mask, dim=1)
     
     decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
+    #print(f'Decoded: {decoded_sents}')
     total_reward = get_reward(
         decoded_sents, batch['target_txt'], sensation_model, classifier_tokenizer, device)
+        # batch_size
     total_reward = total_reward.unsqueeze(1)
     
     # getting (R - \hat{R}_t)
     # torch.Size([batch, 1]) torch.Size([batch, max_r])
-    # print(f'total_reward {total_reward}\nbaseline_reward {baseline_rewards}')
-    baseline_rewards = torch.nn.functional.softmax(baseline_rewards, dim=1)
+    # print(f'sensation {batch["sensation_scores"]}\ntotal_reward {total_reward}\nbaseline_reward {baseline_rewards}')
+    # baseline_rewards = torch.nn.functional.softmax(baseline_rewards, dim=1)
+    # reward = torch.abs(total_reward.detach() - baseline_rewards.detach())
     reward = total_reward.detach() - baseline_rewards.detach()
+    # print(f'reward {reward}')
     sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
     # print(f'sensation {(1 - batch["sensation_scores"])}')
     # print(f'reward: {reward}\nsum: {torch.sum(torch.stack(step_losses, 1), 1)}\nsum_losses {sum_losses}\ndec_lens_var {dec_lens_var}')
     # this is for ARL
     if use_s_score:
+        # use the model instead
+        # batch_avg_loss = sum_losses / \
+        #     dec_lens_var.float()*(1 - batch["sensation_scores"])
         batch_avg_loss = sum_losses / \
-            dec_lens_var.float()*(1 - batch["sensation_scores"])
+            dec_lens_var.float()*((1 - batch["sensation_scores"]) * args['beta'])
     else:
         batch_avg_loss = sum_losses/dec_lens_var.float()
     # print(batch_avg_loss)
@@ -83,57 +97,76 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
         (total_reward - baseline_rewards) ** 2 * all_step_mask) / torch.sum(all_step_mask)
     return total_reward.mean(), loss, rewards_loss
 
-def get_loss(args, batch, decoder, tokenizer, use_s_score=False):
-    # calculates MLE loss
-    # seems like target and dec batches are the same
+def get_supervised_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, use_s_score):
+    print('Running Supervised loss...')
     device = torch.device('cuda', args['local_rank'])
-    _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
-        batch)
-    inputs, targets, _ = init_batch(tokenizer, batch, device=device)
+    inputs, targets, batch_size = init_batch(tokenizer, batch, device=device)
+    target_batch, dec_padding_mask, _, dec_lens_var = get_output_from_batch(
+        targets)
+
     step_losses = []
+    all_targets = []
 
-    for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
-        target = target_batch[:, di]
-        label = torch.cat((inputs['input_ids'], target.unsqueeze(1)), 1)
-        inputs, _, final_dist, step_loss = run_decoder(decoder, tokenizer, inputs, labels=inputs['input_ids'])
+    step_mask = Variable(torch.ones(batch_size)).float()
+    
+    if USE_CUDA:
+        step_mask = step_mask.to(device)
 
-        step_mask = dec_padding_mask[:, di]
+    # in len of maximum size of headlines
+    for di in range(args["max_r"]):
+        inputs, outputs, final_dist, target, _ = run_decoder(decoder, tokenizer, inputs)
+        all_targets.append(target.detach())
+        # print(inputs['input_ids'], inputs['input_ids'].shape)
+        decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
+        
+        # decoded_sents = list(map(lambda x: x.split(), tokenizer.batch_decode(inputs['input_ids'])))
+        if di == 0:
+            step_loss = torch.zeros(batch_size, device=device)
+        else:
+            step_loss = get_reward(decoded_sents, batch['target_txt'], sensation_model, classifier_tokenizer, device)
+        step_loss = step_loss.unsqueeze(1)
+        
         step_loss = step_loss * step_mask
         step_losses.append(step_loss)
-
-        # Teacher forcing
-        inputs['input_ids'][:, -1] = targets['input_ids'][:, di]
-
+        step_mask = torch.clamp(
+            step_mask - (target == tokenizer.eos_token_id).float(), min=0.0)
+    
     sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
+
+    # this is for ARL
     if use_s_score:
+        # use the model instead
         batch_avg_loss = sum_losses / \
-            dec_lens_var.float()*batch["sensation_scores"]
+            dec_lens_var.float()*((1 - batch["sensation_scores"]) * args['beta'])
     else:
         batch_avg_loss = sum_losses/dec_lens_var.float()
-    loss = torch.mean(batch_avg_loss)
+
+    supervised_loss = torch.mean(batch_avg_loss)
+    ml_loss = get_loss(args, batch, decoder, tokenizer, use_s_score=use_s_score)
+
+    if use_s_score:
+        print('Using AP loss...')
+        loss = supervised_loss + ml_loss
+    else:
+        loss = (1 - args["ml_wt"]) * supervised_loss + \
+            args["ml_wt"] * ml_loss
 
     return loss
 
-def old_get_loss(args, decoder, tokenizer, batch, use_s_score=False):
+def get_loss(args, batch, decoder, tokenizer, use_s_score=False):
+    print('Running MLE loss...')
     # calculates MLE loss
     # seems like target and dec batches are the same
     device = torch.device('cuda', args['local_rank'])
-    _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
-        batch)
-
     inputs, targets, _ = init_batch(tokenizer, batch, device=device)
-    print(f'targets {targets}')
+    target_batch, dec_padding_mask, _, dec_lens_var = get_output_from_batch(
+        targets)
+
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
-        inputs, _, final_dist, _ = run_decoder(decoder, tokenizer, inputs)
-        print(target_batch)
-        target = target_batch[:, di]
-        print(target)
-        final_dist = final_dist.softmax(dim=1)
-        gold_probs = torch.gather(
-            final_dist, 1, target.unsqueeze(1)).squeeze()
-        step_loss = -torch.log(gold_probs + args["eps"])
+        inputs, _, _, _, step_loss = run_decoder(decoder, tokenizer, inputs, labels=inputs['input_ids'])
+
         step_mask = dec_padding_mask[:, di]
         step_loss = step_loss * step_mask
         step_losses.append(step_loss)
@@ -144,7 +177,7 @@ def old_get_loss(args, decoder, tokenizer, batch, use_s_score=False):
     sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
     if use_s_score:
         batch_avg_loss = sum_losses / \
-            dec_lens_var.float()*batch["sensation_scores"]
+            dec_lens_var.float()*(1 - ((1 - batch["sensation_scores"]) * args['beta']))
     else:
         batch_avg_loss = sum_losses/dec_lens_var.float()
     loss = torch.mean(batch_avg_loss)
@@ -153,14 +186,15 @@ def old_get_loss(args, decoder, tokenizer, batch, use_s_score=False):
 
 def get_prob(args, decoder, tokenizer, batch):
     device = torch.device('cuda', args['local_rank'])
-    _, dec_padding_mask, _, dec_lens_var, target_batch = get_output_from_batch(
-        batch)
-
     inputs, targets, _ = init_batch(tokenizer, batch, device=device)
+    target_batch, dec_padding_mask, _, dec_lens_var = get_output_from_batch(
+        targets)
+
+    
     step_losses = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
-        inputs, _, final_dist, _ = run_decoder(decoder, tokenizer, inputs)
+        inputs, _, final_dist, _, _ = run_decoder(decoder, tokenizer, inputs)
 
         target = target_batch[:, di]
 

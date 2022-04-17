@@ -1,14 +1,16 @@
 import torch
+import transformers
 from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, TrainingArguments, get_scheduler, AutoTokenizer, AutoModelWithLMHead, AutoConfig
 
 import deepspeed
 from transformers.deepspeed import HfDeepSpeedConfig
 
 from dutils.config import USE_CUDA, get_args
-from models.losses import get_rl_loss
-from models.models import PersuasivenessClassifier
+from models.losses import get_rl_loss, get_loss, get_supervised_loss
+from models.models import PersuasivenessClassifier, PersuasivenessClassifierScore
 from dutils.data_utils import prepare_data_seq
 
+import os
 from numpy import random
 random.seed(123)
 torch.manual_seed(123)
@@ -24,16 +26,18 @@ class CustomTrainer(Trainer):
         self.eval_dataloader = eval_dataloader
 
         self.sensation_model = sensation_model
-        self.expected_reward_layer = torch.nn.Linear(
-            custom_args["hidden_size"], 1)
-        self.rl_optimizer = torch.optim.Adam(self.expected_reward_layer.parameters(), lr=custom_args["rl_lr"])
 
-        if USE_CUDA:
-            self.expected_reward_layer.to(torch.device('cuda', custom_args['local_rank']))
+        if self.custom_args['use_rl']:
+            self.expected_reward_layer = torch.nn.Linear(
+                custom_args["hidden_size"], 1)
+            self.rl_optimizer = torch.optim.Adam(self.expected_reward_layer.parameters(), lr=custom_args["rl_lr"])
+
+            if USE_CUDA:
+                self.expected_reward_layer.to(torch.device('cuda', custom_args['local_rank']))
+            self.expected_rewards_loss = 0
 
         self.classifier_tokenizer = classifier_tokenizer
-
-        self.expected_rewards_loss = 0
+        
 
     def get_train_dataloader(self):
         return self.train_dataloader
@@ -47,19 +51,27 @@ class CustomTrainer(Trainer):
 
         with self.autocast_smart_context_manager():
             # loss = self.compute_loss(model, inputs)
-            # _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-            #                                             self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
-            loss = get_loss(self.custom_args, inputs, model, self.tokenizer, use_s_score=self.custom_args["use_s_score"])
+            if self.custom_args['ml_wt'] == 1.0:
+                loss = get_loss(self.custom_args, inputs, model, self.tokenizer, use_s_score=self.custom_args["use_s_score"])
+            elif not self.custom_args['use_rl']:
+                loss = get_supervised_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model, self.classifier_tokenizer, use_s_score=self.custom_args["use_s_score"])
+            else:
+                _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
+                                                        self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
 
         if self.args.n_gpu > 1:
             loss = loss.mean()
-            expected_reward_loss = expected_reward_loss.mean()
+            if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+                expected_reward_loss = expected_reward_loss.mean()
 
         if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
-            expected_reward_loss = expected_reward_loss / \
-                self.args.gradient_accumulation_steps
+            if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+                expected_reward_loss = expected_reward_loss / self.args.gradient_accumulation_steps
+
+        if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+            self.rl_optimizer.zero_grad()
 
         if self.do_grad_scaling:
             self.scaler.scale(loss).backward()
@@ -74,24 +86,32 @@ class CustomTrainer(Trainer):
         elif self.deepspeed:
             # loss gets scaled under gradient_accumulation_steps in deepspeed
             loss = self.deepspeed.backward(loss)
-            expected_reward_loss = self.deepspeed.backward(
-                expected_reward_loss)
+            if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+                expected_reward_loss = self.deepspeed.backward(
+                    expected_reward_loss)
         else:
             loss.backward()
-            expected_reward_loss.backward()
+            if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+                expected_reward_loss.backward()
 
-        self.rl_optimizer.zero_grad()
         torch.nn.utils.clip_grad_norm(model.parameters(), self.custom_args["max_grad_norm"])
-        expected_reward_loss = expected_reward_loss.detach()
-
-        self.rl_optimizer.step()
-        self.expected_rewards_loss += expected_reward_loss.data
-        print(loss, expected_reward_loss)
+        if self.custom_args['ml_wt'] != 1.0 and self.custom_args['use_rl']:
+            expected_reward_loss = expected_reward_loss.detach()
+            self.rl_optimizer.step()
+            self.expected_rewards_loss += expected_reward_loss.data
+            print(loss, expected_reward_loss)
+        else:
+            print(loss)
         return loss.detach()
 
     def compute_loss(self, model, inputs, return_outputs=False):
-        _, loss, _ = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-                                 self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
+        if self.custom_args['ml_wt'] == 1.0:
+            loss = get_loss(self.custom_args, inputs, model, self.tokenizer, use_s_score=self.custom_args["use_s_score"])
+        elif not self.custom_args['use_rl']:
+            loss = get_supervised_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model, self.classifier_tokenizer, use_s_score=self.custom_args["use_s_score"])
+        else:
+            _, loss, _ = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
+                                     self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
 
         outputs = None
         if return_outputs:
@@ -105,17 +125,18 @@ if __name__ == "__main__":
     # custom_args['generator'] = "/expanse/lustre/projects/uic333/smoorjani/progressive_generation/training_logs/gpt2_cnn_fullwords"
     custom_args['generator'] = 'ktrapeznikov/gpt2-medium-topic-news'
     custom_args['hidden_size'] = 1024
-    custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/persuasive_model1.pth"
+    custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/persuasive_model_score.pth"
 
-    sensation_model = PersuasivenessClassifier()
+    sensation_model = PersuasivenessClassifierScore()
     # sd = torch.load(custom_args['persuasivness_clasifier_path'])['state_dict']
     # state_dict = {key.replace('module.','') : value for key, value in sd.items()}
     # sensation_model.load_state_dict(state_dict)
     sensation_model = torch.load(custom_args['persuasivness_clasifier_path'])
 
 
-    training_args = TrainingArguments("/expanse/lustre/projects/uic333/smoorjani/sensational_headline/test_trainer", 
+    training_args = TrainingArguments(custom_args['save_path'], 
                                       per_device_train_batch_size=1,
+                                      save_steps=5000,
                                     #   gradient_accumulation_steps=8,
                                       num_train_epochs=10,
                                       max_steps=100000,
@@ -126,8 +147,9 @@ if __name__ == "__main__":
     device = torch.device('cuda', custom_args['local_rank'])
 
     print('Loading data...')
-    train_dataloader, eval_dataloader, max_q, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
-    custom_args['max_q'] = max_q
+    train_dataloader, eval_dataloader, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
+    print(f'Dataloader len {len(train_dataloader)}, max_r {max_r}')
+    # custom_args['max_q'] = max_q
     # setting max decoding length
     custom_args['max_r'] = 40
 
@@ -175,5 +197,10 @@ if __name__ == "__main__":
         classifier_tokenizer=bert_tokenizer,
     )
     torch.cuda.empty_cache()
-    train_result = trainer.train()
+    transformers.logging.set_verbosity_info()
+    checkpoint_path = os.path.join(custom_args['save_path'], custom_args['checkpoint_name'])
+    if os.path.exists(checkpoint_path):
+        train_result = trainer.train(checkpoint_path)
+    else:
+        train_result = trainer.train()
     trainer.save_model()

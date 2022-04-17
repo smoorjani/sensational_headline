@@ -5,8 +5,7 @@
 *.zip
 *.char
 dataset/
-persuasive_pairs_data_train.txt
-persuasive_pairs_data_test.txt
+persuasive_pairs_data_*.txt
 vocab.txt
 
 # pytorch save files
