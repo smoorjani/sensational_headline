@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument('--dropout', type=float, default=0.0, help="dropout rate")
 
     parser.add_argument("--use_rl", action='store_true', help="use rl or not")
+    parser.add_argument("--use_rep", action='store_true', help="use repetition loss or not")
     parser.add_argument("--rl_lr", type=float, default=0.001, help="learning rate of rl")
 
     parser.add_argument('--generator', type=str, default="gpt2", help="load existing generator") 
@@ -34,14 +35,14 @@ def get_args():
 
     
     ## optimization
-    parser.add_argument('-lr', type=float, default=0.0001, help="learning rate")
-    parser.add_argument('-decay_lr', type=int, default=3, help="decay learning rate if validation is not improving")
-    parser.add_argument('-epochs', type=int, default=100, help="epochs for runing")
-    parser.add_argument('-total_steps', type=int, default=100000000, help="total steps for training")
-    parser.add_argument('-optimizer', type=str, default="adam", help="which optimizer to use")
-    parser.add_argument('-max_grad_norm', type=float, default=2.0, help="max grad norm")
+    parser.add_argument('--lr', type=float, default=0.0001, help="learning rate")
+    parser.add_argument('--decay_lr', type=int, default=3, help="decay learning rate if validation is not improving")
+    parser.add_argument('--epochs', type=int, default=100, help="epochs for runing")
+    parser.add_argument('--total_steps', type=int, default=100000000, help="total steps for training")
+    parser.add_argument('--optimizer', type=str, default="adam", help="which optimizer to use")
+    parser.add_argument('--max_grad_norm', type=float, default=2.0, help="max grad norm")
     # TODO: what to do about this - especially in regards to get_loss
-    parser.add_argument('-eps', type=float, default=1e-8, help="epison to avoid 0 probs")
+    parser.add_argument('--eps', type=float, default=1e-5, help="epison to avoid 0 probs")
 
     ## other args
     args = vars(parser.parse_args())

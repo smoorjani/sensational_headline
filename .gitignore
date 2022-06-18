@@ -15,3 +15,9 @@ vocab.txt
 
 test_trainer/
 tmp_trainer/
+generations/
+
+*.out
+training_logs/
+evaluation_log
+log.txt

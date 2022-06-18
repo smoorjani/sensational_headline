@@ -15,6 +15,7 @@
 # conda init bash
 eval "$(conda shell.bash hook)"
 conda activate sen
+export TORCH_EXTENSIONS_DIR="/tmp/${USER}/torch_extensions"
 # cd /jet/home/moorjani/sensational_headline
 cd /home/smoorjani/sensational_headline
 
@@ -22,10 +23,13 @@ cd /home/smoorjani/sensational_headline
 # deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 0 --use_rl 1 --ml_wt 0.5 --training_data dataset/16k_cmv_train.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/test_trainer
 
 # MLE training on CMV
-# deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 0 --ml_wt 1.0 --training_data dataset/16k_cmv_train.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/test_trainer
+# deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 0 --ml_wt 1.0 --training_data dataset/16k_cmv_cnn_hold-firefox-marriage.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/mle/16k_cmv_cnn_hold_mle_trainer
 
 # MLE + SUP on CMV  + CNN 
 # deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 0 --ml_wt 0.9 --training_data dataset/16k_cmv_cnn_train.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/16k_cmv_cnn_ml-0.9_trainer
 
 # MLE + SUP on CMV - Auto-tuned 
-deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 1 --beta 1.0 --training_data dataset/16k_cmv_train.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/16k_cmv_ap-1.0_trainer
+# deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 1 --beta 0.5 --training_data dataset/16k_cmv_cnn_hold-firefox-marriage.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/16k_cmv_cnn_hold_ap-0.5_trainer
+
+# ARL on CMV+CNN
+deepspeed --num_gpus=2 sensation_generation_trainer.py --batch_size 2 -eps 1e-5 --use_s_score 1 --beta 0.8 --training_data dataset/16k_cmv_cnn_hold-firefox-marriage.txt --save_path /expanse/lustre/projects/uic333/smoorjani/sensational_headline/16k_cmv_cnn_hold_arl-0.8_trainer --use_rl

@@ -6,7 +6,7 @@ from models.batch_utils import decoded_batch_to_txt, get_output_from_batch, init
 from models.sensation_scorer import get_reward
 from dutils.config import *
 
-def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, use_s_score, hidden_size=1024):
+def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, expected_reward_layer, tfidf_map, use_s_score, hidden_size=1024):
     print('Running RL loss...')
     device = torch.device('cuda', args['local_rank'])
     inputs, _, batch_size = init_batch(tokenizer, batch, device=device)
@@ -46,8 +46,8 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
 
     # this is the linear layer that calculates \hat{R}_t
     # TODO: logistic layer
-    sigmoid = nn.Sigmoid().to(device)
-    baseline_rewards = [sigmoid(expected_reward_layer(output1.detach())) * step_mask.unsqueeze(1).detach()
+    # sigmoid = nn.Sigmoid().to(device)
+    baseline_rewards = [expected_reward_layer(output1.detach()) * step_mask.unsqueeze(1).detach()
                         for output1, step_mask in zip(all_output1, all_step_mask)]
                         # batch size x decoding steps
     # for i, (output1, step_mask) in enumerate(zip(all_output1, all_step_mask)):
@@ -68,8 +68,8 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
     # torch.Size([batch, 1]) torch.Size([batch, max_r])
     # print(f'sensation {batch["sensation_scores"]}\ntotal_reward {total_reward}\nbaseline_reward {baseline_rewards}')
     # baseline_rewards = torch.nn.functional.softmax(baseline_rewards, dim=1)
-    # reward = torch.abs(total_reward.detach() - baseline_rewards.detach())
-    reward = total_reward.detach() - baseline_rewards.detach()
+    reward = torch.abs(total_reward.detach() - baseline_rewards.detach())
+    # reward = total_reward.detach() - baseline_rewards.detach()
     # print(f'reward {reward}')
     sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
     # print(f'sensation {(1 - batch["sensation_scores"])}')
@@ -85,7 +85,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
         batch_avg_loss = sum_losses/dec_lens_var.float()
     # print(batch_avg_loss)
     rl_loss = torch.mean(batch_avg_loss)
-    ml_loss = get_loss(args, batch, decoder, tokenizer, use_s_score=use_s_score)
+    ml_loss = get_loss(args, batch, decoder, tokenizer, tfidf_map, use_s_score=use_s_score)
     print(f'rl_loss: {rl_loss}, ml_loss: {ml_loss}')
     if use_s_score:
         loss = rl_loss + ml_loss
@@ -97,7 +97,7 @@ def get_rl_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tok
         (total_reward - baseline_rewards) ** 2 * all_step_mask) / torch.sum(all_step_mask)
     return total_reward.mean(), loss, rewards_loss
 
-def get_supervised_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, use_s_score):
+def get_supervised_loss(args, batch, decoder, tokenizer, sensation_model, classifier_tokenizer, tfidf_map, use_s_score):
     print('Running Supervised loss...')
     device = torch.device('cuda', args['local_rank'])
     inputs, targets, batch_size = init_batch(tokenizer, batch, device=device)
@@ -142,7 +142,7 @@ def get_supervised_loss(args, batch, decoder, tokenizer, sensation_model, classi
         batch_avg_loss = sum_losses/dec_lens_var.float()
 
     supervised_loss = torch.mean(batch_avg_loss)
-    ml_loss = get_loss(args, batch, decoder, tokenizer, use_s_score=use_s_score)
+    ml_loss = get_loss(args, batch, decoder, tokenizer, tfidf_map, use_s_score=use_s_score)
 
     if use_s_score:
         print('Using AP loss...')
@@ -153,7 +153,7 @@ def get_supervised_loss(args, batch, decoder, tokenizer, sensation_model, classi
 
     return loss
 
-def get_loss(args, batch, decoder, tokenizer, use_s_score=False):
+def get_loss(args, batch, decoder, tokenizer, tfidf_map, use_s_score=False):
     print('Running MLE loss...')
     # calculates MLE loss
     # seems like target and dec batches are the same
@@ -163,6 +163,7 @@ def get_loss(args, batch, decoder, tokenizer, use_s_score=False):
         targets)
 
     step_losses = []
+    generated = []
 
     for di in range(min(targets['input_ids'].shape[-1], args["max_r"])):
         inputs, _, _, _, step_loss = run_decoder(decoder, tokenizer, inputs, labels=inputs['input_ids'])
@@ -171,8 +172,23 @@ def get_loss(args, batch, decoder, tokenizer, use_s_score=False):
         step_loss = step_loss * step_mask
         step_losses.append(step_loss)
 
+        if args['use_rep']:
+            generated.append(inputs['input_ids'][:, -1])
+
         # Teacher forcing
         inputs['input_ids'][:, -1] = targets['input_ids'][:, di]
+
+    if args['use_rep']:
+        # stacks the generated tokens (column-wise)
+        generated = torch.stack(generated, dim=1)
+
+        rep_loss = 0
+        for i in range(generated.shape[0]):
+            keys, counts = generated[i, :].unique(return_counts=True)
+            token_keys = tokenizer.decode(keys).split(' ')
+            for i, token in enumerate(token_keys):
+                if token in tfidf_map and counts[i].item() > 1:
+                    rep_loss += (counts[i].item() - 1) * tfidf_map[token.lower()]
 
     sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
     if use_s_score:

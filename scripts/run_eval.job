@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --job-name="sensational_headline_eval"
+#SBATCH --output="%j.%N.out"
+#SBATCH --partition=gpu-shared
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --gpus=2
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=93G
+#SBATCH --constraint="lustre"
+#SBATCH --account=TG-CIE160004
+#SBATCH --no-requeue
+#SBATCH -t 2:00:00
+
+# module load anaconda3
+# conda init bash
+eval "$(conda shell.bash hook)"
+conda activate sen
+# export TORCH_EXTENSIONS_DIR="/tmp/${USER}/torch_extensions"
+# cd /jet/home/moorjani/sensational_headline
+cd /home/smoorjani/sensational_headline
+
+python dutils/evaluation.py

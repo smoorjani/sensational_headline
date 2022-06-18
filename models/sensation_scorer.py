@@ -27,8 +27,9 @@ def get_reward(decoded_sents, target_sents, sensation_model, tokenizer, device=N
 
 
     if USE_CUDA:
-        sensation_model = sensation_model.to(sensation_model.device_ids[0])
-        staging_device = sensation_model.device_ids[0]
+        staging_device = next(sensation_model.parameters()).device
+        # staging_device = sensation_model.device_ids[0]
+        sensation_model = sensation_model.to(staging_device)
         batch = {key: item.to(staging_device) for key, item in batch.items()}
 
     try:

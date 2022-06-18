@@ -19,7 +19,7 @@ if torch.cuda.is_available():
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, args, model, tokenizer, optimizers, train_dataloader, eval_dataloader, custom_args, sensation_model, classifier_tokenizer):
+    def __init__(self, args, model, tokenizer, optimizers, train_dataloader, eval_dataloader, custom_args, sensation_model, classifier_tokenizer, tfidf_map):
         super(CustomTrainer, self).__init__(args=args, model=model, tokenizer=tokenizer, optimizers=optimizers)
         self.custom_args = custom_args
         self.train_dataloader = train_dataloader
@@ -37,6 +37,7 @@ class CustomTrainer(Trainer):
             self.expected_rewards_loss = 0
 
         self.classifier_tokenizer = classifier_tokenizer
+        self.tfidf_map = tfidf_map
         
 
     def get_train_dataloader(self):
@@ -52,12 +53,12 @@ class CustomTrainer(Trainer):
         with self.autocast_smart_context_manager():
             # loss = self.compute_loss(model, inputs)
             if self.custom_args['ml_wt'] == 1.0:
-                loss = get_loss(self.custom_args, inputs, model, self.tokenizer, use_s_score=self.custom_args["use_s_score"])
+                loss = get_loss(self.custom_args, inputs, model, self.tokenizer, self.tfidf_map, use_s_score=self.custom_args["use_s_score"])
             elif not self.custom_args['use_rl']:
-                loss = get_supervised_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model, self.classifier_tokenizer, use_s_score=self.custom_args["use_s_score"])
+                loss = get_supervised_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model, self.classifier_tokenizer, self.tfidf_map, use_s_score=self.custom_args["use_s_score"])
             else:
                 _, loss, expected_reward_loss = get_rl_loss(self.custom_args, inputs, model, self.tokenizer, self.sensation_model,
-                                                        self.classifier_tokenizer, self.expected_reward_layer, use_s_score=self.custom_args["use_s_score"])
+                                                        self.classifier_tokenizer, self.expected_reward_layer, self.tfidf_map, use_s_score=self.custom_args["use_s_score"])
 
         if self.args.n_gpu > 1:
             loss = loss.mean()
@@ -125,7 +126,10 @@ if __name__ == "__main__":
     # custom_args['generator'] = "/expanse/lustre/projects/uic333/smoorjani/progressive_generation/training_logs/gpt2_cnn_fullwords"
     custom_args['generator'] = 'ktrapeznikov/gpt2-medium-topic-news'
     custom_args['hidden_size'] = 1024
-    custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/persuasive_model_score.pth"
+    # custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/persuasive_model_score.pth"
+    custom_args['persuasivness_clasifier_path'] = "/expanse/lustre/projects/uic333/smoorjani/persuasive_model/imdb_model.pth"
+
+    os.environ['MASTER_PORT'] = '12360'
 
     sensation_model = PersuasivenessClassifierScore()
     # sd = torch.load(custom_args['persuasivness_clasifier_path'])['state_dict']
@@ -136,10 +140,10 @@ if __name__ == "__main__":
 
     training_args = TrainingArguments(custom_args['save_path'], 
                                       per_device_train_batch_size=1,
-                                      save_steps=5000,
+                                      save_steps=10000,
                                     #   gradient_accumulation_steps=8,
                                       num_train_epochs=10,
-                                      max_steps=100000,
+                                      max_steps=custom_args['total_steps'],
                                       deepspeed=custom_args['ds_config'],
                                       fp16=True
                                     )
@@ -147,7 +151,7 @@ if __name__ == "__main__":
     device = torch.device('cuda', custom_args['local_rank'])
 
     print('Loading data...')
-    train_dataloader, eval_dataloader, max_r = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
+    train_dataloader, eval_dataloader, max_r, tfidf_map = prepare_data_seq(custom_args['training_data'], custom_args['eval_data'], custom_args['batch_size'], thd=custom_args['thd'])
     print(f'Dataloader len {len(train_dataloader)}, max_r {max_r}')
     # custom_args['max_q'] = max_q
     # setting max decoding length
@@ -195,6 +199,7 @@ if __name__ == "__main__":
         custom_args=custom_args,
         sensation_model=sensation_model,
         classifier_tokenizer=bert_tokenizer,
+        tfidf_map=tfidf_map,
     )
     torch.cuda.empty_cache()
     transformers.logging.set_verbosity_info()
