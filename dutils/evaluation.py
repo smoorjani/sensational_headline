@@ -13,41 +13,32 @@ MODELS_TO_USE = [
     # '16k_cmv_arl-0.1_trainer/checkpoint-10000',
     # '16k_cmv_ap-1.0_trainer/checkpoint-10000',
     # '16k_cmv_ap-0.1_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_arl-0.5_trainer/checkpoint-10000',
-    # '16k_cmv_cnn_hold_arl-0.8_trainer/checkpoint-10000',
-    # 'mle/16k_hold_mle_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_arl-0.5_trainer/checkpoint-10000',
+    '16k_cmv_cnn_hold_arl-0.8_trainer/checkpoint-10000',
+    'mle/16k_hold_mle_trainer/checkpoint-10000',
     # 'mle/16k_cmv_hold_mle_trainer/checkpoint-10000',
-    # 'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-10000',
-    # '16k_cmv_arl-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_arl-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_ap-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_ap-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-20000',
-    # 'mle/16k_hold_mle_trainer/checkpoint-20000',
-    # 'mle/16k_cmv_hold_mle_trainer/checkpoint-20000',
-    # 'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-20000',
+    'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-10000',
     # 'imdb_cnn_arl-0.1_trainer/checkpoint-10000',
     # 'imdb_cnn_ap-0.1_trainer/checkpoint-10000',
     # 'imdb_cnn_arl-0.8_trainer/checkpoint-10000',
     # 'imdb_cnn_ap-1.0_trainer/checkpoint-10000',
     # 'imdb_cnn_arl-0.5_trainer/checkpoint-10000',
     # 'imdb_cnn_arl-1.0_trainer/checkpoint-10000',
-    # 'imdb_cnn_mle-1.0_trainer/checkpoint-10000',
-    # 'imdb_mle-1.0_trainer/checkpoint-10000',
+    'imdb_cnn_mle-1.0_trainer/checkpoint-10000',
+    'imdb_mle-1.0_trainer/checkpoint-10000',
     
 ]
 
-MODEL_BASE_DIR = ''
-MODELS_TO_USE = [
-    'gpt2'
-]
+# MODEL_BASE_DIR = ''
+# MODELS_TO_USE = [
+#     # 'gpt2'
+#     'title_stylist'
+#     # 'tagger_generator'
+# ]
 SUPPORTED_METRICS = ['rouge', 'meteor', 'perplexity']
 
 def get_args():
@@ -55,7 +46,7 @@ def get_args():
     parser.add_argument('--n', type=float, help='Number of tokens to take from each input', default=0.2)
     parser.add_argument('--length', type=int, help='Amount of new words added to input', default=100)
     parser.add_argument('--device', type=str, help='Device to inference on', default='cuda')
-    parser.add_argument('--test_file', type=str, help='File with test sentences/prompts', default='dataset/imdb_test2.txt')
+    parser.add_argument('--test_file', type=str, help='File with test sentences/prompts', default='dataset/16k_marriage_firefox.txt')
     parser.add_argument('--logging_file', type=str, help='File to log to', default='./evaluation_log')
     parser.add_argument('--arch', type=str, help='Model architecture', default='ktrapeznikov/gpt2-medium-topic-news')
     parser.add_argument('--model_name', type=str, help='Model to evaluate', default="")
@@ -70,6 +61,7 @@ def read_test_set(args):
     new_prompts = []
     gold = []
     for line in lines:
+        # remove for memorability
         # prompt, _, response = line.split('\t')
         response = line.strip()
         prompt = ''
@@ -156,8 +148,8 @@ if __name__ == '__main__':
     tokenizer = GPT2Tokenizer.from_pretrained(args.arch)
 
     if len(args.model_name):
-        # MODELS_TO_USE = MODELS_TO_USE + [args.model_name]
-        MODELS_TO_USE = [args.model_name]
+        MODELS_TO_USE = MODELS_TO_USE + [args.model_name]
+        # MODELS_TO_USE = [args.model_name]
 
     model_scores = []
     for model_name in MODELS_TO_USE:
@@ -172,13 +164,14 @@ if __name__ == '__main__':
         else:
             logger.info(model_name + '\n')
             print(model_name + '\n')
-            try:
-                model = GPT2LMHeadModel.from_pretrained("gpt2").to(args.device)
+            model = GPT2LMHeadModel.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
+            # try:
+                # model = GPT2LMHeadModel.from_pretrained("ktrapeznikov/gpt2-medium-topic-news").to(args.device)
                 # print(os.path.join(MODEL_BASE_DIR, model_name))
                 # model = GPT2LMHeadModel.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
-            except OSError:
-                print("Can't load this model right now to generate sentences.")
-                continue
+            # except OSError:
+                # print("Can't load this model right now to generate sentences.")
+                # continue
             predictions = generate_predictions(args, prompts, model, tokenizer)
             predictions = postprocess_preds(predictions, prompt_blacklist=arg_prompts, blacklist=['CMV'])
 
@@ -208,7 +201,17 @@ if __name__ == '__main__':
         
 
         
-        
+    # '16k_cmv_arl-1.0_trainer/checkpoint-20000',
+    # '16k_cmv_arl-0.1_trainer/checkpoint-20000',
+    # '16k_cmv_ap-1.0_trainer/checkpoint-20000',
+    # '16k_cmv_ap-0.1_trainer/checkpoint-20000',
+    # '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-20000',
+    # '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-20000',
+    # '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-20000',
+    # '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-20000',
+    # 'mle/16k_hold_mle_trainer/checkpoint-20000',
+    # 'mle/16k_cmv_hold_mle_trainer/checkpoint-20000',
+    # 'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-20000',
 
 
 

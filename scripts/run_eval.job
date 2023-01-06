@@ -4,7 +4,7 @@
 #SBATCH --partition=gpu-shared
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=16
-#SBATCH --gpus=2
+#SBATCH --gpus=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=93G
 #SBATCH --constraint="lustre"
