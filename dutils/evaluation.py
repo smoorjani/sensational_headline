@@ -1,217 +1,68 @@
-import os
-import torch
 import logging
-import argparse
-import pandas as pd
-from datasets import load_metric
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import numpy as np
 
-DATA_BASE_DIR = '/home/smoorjani/sensational_headline/'
-MODEL_BASE_DIR = '/expanse/lustre/projects/uic333/smoorjani/sensational_headline/'
-MODELS_TO_USE = [
-    # '16k_cmv_arl-1.0_trainer/checkpoint-10000',
-    # '16k_cmv_arl-0.1_trainer/checkpoint-10000',
-    # '16k_cmv_ap-1.0_trainer/checkpoint-10000',
-    # '16k_cmv_ap-0.1_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_arl-0.5_trainer/checkpoint-10000',
-    '16k_cmv_cnn_hold_arl-0.8_trainer/checkpoint-10000',
-    'mle/16k_hold_mle_trainer/checkpoint-10000',
-    # 'mle/16k_cmv_hold_mle_trainer/checkpoint-10000',
-    'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-10000',
-    # 'imdb_cnn_arl-0.1_trainer/checkpoint-10000',
-    # 'imdb_cnn_ap-0.1_trainer/checkpoint-10000',
-    # 'imdb_cnn_arl-0.8_trainer/checkpoint-10000',
-    # 'imdb_cnn_ap-1.0_trainer/checkpoint-10000',
-    # 'imdb_cnn_arl-0.5_trainer/checkpoint-10000',
-    # 'imdb_cnn_arl-1.0_trainer/checkpoint-10000',
-    'imdb_cnn_mle-1.0_trainer/checkpoint-10000',
-    'imdb_mle-1.0_trainer/checkpoint-10000',
-    
-]
+from dutils.losses import get_prob
+from dutils.batch_utils import decode_batch
+from dutils.sensation_scorer import get_reward
 
-# MODEL_BASE_DIR = ''
-# MODELS_TO_USE = [
-#     # 'gpt2'
-#     'title_stylist'
-#     # 'tagger_generator'
-# ]
-SUPPORTED_METRICS = ['rouge', 'meteor', 'perplexity']
+from dutils.rouge import rouge
 
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--n', type=float, help='Number of tokens to take from each input', default=0.2)
-    parser.add_argument('--length', type=int, help='Amount of new words added to input', default=100)
-    parser.add_argument('--device', type=str, help='Device to inference on', default='cuda')
-    parser.add_argument('--test_file', type=str, help='File with test sentences/prompts', default='dataset/16k_marriage_firefox.txt')
-    parser.add_argument('--logging_file', type=str, help='File to log to', default='./evaluation_log')
-    parser.add_argument('--arch', type=str, help='Model architecture', default='ktrapeznikov/gpt2-medium-topic-news')
-    parser.add_argument('--model_name', type=str, help='Model to evaluate', default="")
-    args = parser.parse_args()
-    return args
+class Evaluation():
+    def __init__(self, decoder, tokenizer, classifier_tokenizer):
+        self.decoder = decoder
+        self.tokenizer = tokenizer
+        self.classifier_tokenizer = classifier_tokenizer
 
-def read_test_set(args):
-    with open(os.path.join(DATA_BASE_DIR, args.test_file)) as f:
-        lines = f.readlines()
+    def get_rep_rate(self, sents):
+        num_uni_tokens, num_tokens = 0, 0
+        for sent in sents:
+            tokens = sent.strip().split()
+            num_uni_tokens += len(set(tokens))
+            num_tokens += len(tokens)
+        return 1. - num_uni_tokens * 1.0 / num_tokens
 
-    prompts = []
-    new_prompts = []
-    gold = []
-    for line in lines:
-        # remove for memorability
-        # prompt, _, response = line.split('\t')
-        response = line.strip()
-        prompt = ''
-        n_tokens = int(args.n if args.n >= 1 or not args.n else len(line.split()) * args.n)
-        new_prompt = prompt + ' ' +  ' '.join(response.split(' ')[:n_tokens])
-        new_prompt = new_prompt.replace('.', '').replace('!','').replace('?','')
+    def evaluate(self, args, dev, return_pred=False, discriminator=None):
 
-        prompts.append(prompt)
-        new_prompts.append(new_prompt)
-        gold.append(response)
+        logging.info("start evaluation")
+        hyp = []
+        ref = []
+        tmp_loss = []
+        rewards = []
+        deltas = []
+        articles = []
 
-    return prompts, gold, new_prompts
+        for _, data_dev in enumerate(dev):
+            l = get_prob(args, self.decoder, self.tokenizer, data_dev)
+            tmp_loss.append(float(l.data.cpu().numpy()))
 
-def generate_predictions(args, prompts, model, tokenizer):
-    outputs = []
-    for inp in prompts:
-        inputs = tokenizer(inp, return_tensors='pt').to(args.device)
-        output = model.generate(
-            **inputs, 
-            max_length=args.length, 
-            num_beams=5, 
-            early_stopping=True
-        )
+            decoded_sents = decode_batch(self.decoder, self.tokenizer, data_dev)
+            for i, sent in enumerate(decoded_sents):
+                hyp.append(" ".join(sent))
+                ref.append(" ".join(data_dev["target_txt"][i].split()))
+                articles.append(data_dev["input_txt"][i])
+            if discriminator is not None:
+                rewards.extend([r for r in get_reward(
+                    self.classifier_tokenizer, decoded_sents, data_dev, discriminator)])
+            if "deltas" in data_dev:
+                deltas.extend([float(s)
+                                        for s in data_dev["deltas"]])
 
-        output = tokenizer.decode(output[0], skip_special_tokens=True)
-        outputs.append(output)
-    return outputs
+        rouge_score = rouge(hyp, ref)
+        logging.info("score: {}, ref repeatition rate: {}, prediction repeatition rate: {}".format(
+            rouge_score, self.get_rep_rate(ref), self.get_rep_rate(hyp)))
+        dev_loss = np.mean(tmp_loss)
+        logging.info("dev loss: "+str(dev_loss))
+        logging.info("rewards: "+str(sum(rewards) / len(rewards)))
 
-def get_metric(args, references, metric_name='rouge', predictions=None, model_id=None):
-    assert metric_name in SUPPORTED_METRICS
-    metric = load_metric(metric_name)
-
-    if 'perplexity' == metric_name:
-        assert model_id is not None
-        return metric.compute(input_texts=references, model_id=model_id, device=args.device)
-    elif 'rouge' == metric_name:
-        assert predictions is not None
-        rouge_scores = metric.compute(predictions=predictions, references=references)
-        rouge_scores = {k: v.high for k, v in rouge_scores.items()}
-
-        split_rouge_scores = {}
-        for key, val in rouge_scores.items():
-            split_rouge_scores[key + '_P'] = val.precision
-            split_rouge_scores[key + '_R'] = val.recall
-            split_rouge_scores[key + '_F'] = val.fmeasure
-        return split_rouge_scores
-    else:
-        assert predictions is not None
-        return metric.compute(predictions=predictions, references=references)
-
-def postprocess_preds(predictions, prompt_blacklist, blacklist, strict=False):
-    new_preds = []
-    for pred in predictions:
-        # remove prompts
-        # for prompt in prompt_blacklist:
-        #     if pred.startswith(prompt):
-        #         pred = pred[len(prompt):]
-        #     if pred.endswith(prompt):
-        #         pred = pred[:-len(prompt)]
-
-        #     if strict:
-        #         pred = pred.replace(prompt,'')
-
-        # remove undesired phrases (e.g. CMV)
-        for phrase in blacklist:
-            pred = pred.replace(phrase, '')
-
-        pred = pred.strip().replace('\n', ' ') + '\n'
-        new_preds.append(pred)
-    return new_preds
-
-if __name__ == '__main__':
-    args = get_args()
-
-    logging.basicConfig(filename=os.path.join(DATA_BASE_DIR, args.logging_file),
-                        filemode='a',
-                        format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-                        datefmt='%H:%M:%S',
-                        level=logging.INFO)
-
-    logger = logging.getLogger('evaluation_logger')
-
-    arg_prompts, gold, prompts = read_test_set(args)
-    tokenizer = GPT2Tokenizer.from_pretrained(args.arch)
-
-    if len(args.model_name):
-        MODELS_TO_USE = MODELS_TO_USE + [args.model_name]
-        # MODELS_TO_USE = [args.model_name]
-
-    model_scores = []
-    for model_name in MODELS_TO_USE:
-        prediction_path = os.path.join(DATA_BASE_DIR, 'generations', model_name.replace('/', '-') + '.txt')
-        if os.path.exists(prediction_path):
-            print(f'{model_name} predictions already exist!')
-            logger.info(f'{model_name} predictions already exist!')
-
-            with open(prediction_path, 'r') as f:
-                predictions = f.readlines()
-
+        if return_pred:
+            return float(sum(rewards) / len(rewards)), dev_loss, (hyp, ref, rewards, deltas, articles)
         else:
-            logger.info(model_name + '\n')
-            print(model_name + '\n')
-            model = GPT2LMHeadModel.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
-            # try:
-                # model = GPT2LMHeadModel.from_pretrained("ktrapeznikov/gpt2-medium-topic-news").to(args.device)
-                # print(os.path.join(MODEL_BASE_DIR, model_name))
-                # model = GPT2LMHeadModel.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
-            # except OSError:
-                # print("Can't load this model right now to generate sentences.")
-                # continue
-            predictions = generate_predictions(args, prompts, model, tokenizer)
-            predictions = postprocess_preds(predictions, prompt_blacklist=arg_prompts, blacklist=['CMV'])
+            return float(sum(rewards) / len(rewards)), dev_loss
 
-            with open(prediction_path, 'w') as f:
-                for pred in predictions:
-                    f.write(pred)
-
-            model = model.cpu()
-            del model
-
-        scores = {'model': model_name}
-        for metric in SUPPORTED_METRICS:
-            try:
-                results = get_metric(args, gold, metric, predictions, os.path.join(MODEL_BASE_DIR, model_name))
-            
-                logger.info(results)
-                print(results)
-                scores.update(results)
-            except OSError:
-                print("Can't load this model right now to calculate perplexity.")
-        model_scores.append(scores)
-    
-    pd.DataFrame(model_scores).to_csv('scores.csv', mode='a')
-    print(model_scores)
-            
-
-        
-
-        
-    # '16k_cmv_arl-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_arl-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_ap-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_ap-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_ap-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_arl-0.1_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_ap-1.0_trainer/checkpoint-20000',
-    # '16k_cmv_cnn_hold_arl-1.0_trainer/checkpoint-20000',
-    # 'mle/16k_hold_mle_trainer/checkpoint-20000',
-    # 'mle/16k_cmv_hold_mle_trainer/checkpoint-20000',
-    # 'mle/16k_cmv_cnn_hold_mle_trainer/checkpoint-20000',
-
-
-
+    def predict_batch(self, batch):
+        hyp, ref = [], []
+        decoded_sents = decode_batch(self.decoder, self.tokenizer, batch)
+        for i, sent in enumerate(decoded_sents):
+            hyp.append(" ".join(sent))
+            ref.append(batch["target_txt"][i])
+        return hyp, ref
