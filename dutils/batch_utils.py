@@ -1,4 +1,4 @@
-from transformers.generation_logits_process import LogitsProcessorList
+from transformers import LogitsProcessorList
 import torch
 
 from dutils.masked_cross_entropy import sequence_mask

@@ -1,5 +1,50 @@
 import numpy as np
 
+class Switch(dict):
+    def __getitem__(self, item):
+        for key in self.keys():                 # iterate over the intervals
+            # if item in key:                     # if the argument is in that interval
+            if key[0] <= item < key[1]:
+                return super().__getitem__(key) # return its associated value
+        raise KeyError(item)                    # if not in any interval, raise KeyError
+
+def get_default_switch(deltas, num_bins=10, zero_thd=1e-4):
+
+    range_dict = {
+        (-zero_thd, zero_thd): '<SPEED_0>',
+    }
+
+    pos_deltas = sorted(list(filter(lambda x: x >= zero_thd, deltas)))
+    neg_deltas = sorted(list(filter(lambda x: x < -zero_thd, deltas)))
+
+    # handle case where there aren't an equal number of deltas for each side
+    # note: this should not ideally be the case
+    pos_ratio = len(pos_deltas) / (len(pos_deltas) + len(neg_deltas))
+    num_pos_bins = int(pos_ratio * num_bins) + 1 # equivalent to math.ceil
+    num_neg_bins = num_bins - num_pos_bins
+
+    def create_ranges(range_dict, deltas, num_bins, multiplier):
+        boundaries = [i for i in range(0, len(deltas), len(deltas) // (num_bins - 1))]
+
+        dir_char = 'P' if multiplier == 1 else 'N'
+        for i in range(len(boundaries)):
+            if i+1 == len(boundaries):
+                range_dict[(deltas[boundaries[i]], multiplier * float('inf'))] = f'<SPEED_{dir_char}{i+1}>'
+            elif i+1 == 1:
+                range_dict[(multiplier * zero_thd, deltas[boundaries[i+1]])] = f'<SPEED_{dir_char}{i+1}>'
+            else:
+                range_dict[(deltas[boundaries[i]], deltas[boundaries[i+1]])] = f'<SPEED_{dir_char}{i+1}>'
+
+        return range_dict
+
+    range_dict = create_ranges(range_dict, pos_deltas, num_pos_bins, 1)
+    neg_deltas.reverse()
+    range_dict = create_ranges(range_dict, neg_deltas, num_neg_bins, -1)
+
+    default_switch = Switch(range_dict)
+
+    return default_switch
+
 def harmonic_mean(r1, r2, beta):
 
     return (1. + beta ** 2) * (r1 * r2) / (beta ** 2 * r1 + r2) 

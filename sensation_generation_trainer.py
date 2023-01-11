@@ -7,8 +7,13 @@ from transformers.deepspeed import HfDeepSpeedConfig
 
 from dutils.config import USE_CUDA, get_args
 from dutils.losses import get_loss
-from speed_control.models import SpeedRegressor
+from dutils.function import Switch
 from dutils.data_utils import prepare_data_seq
+
+import sys
+sys.path.append("..")
+from speed_control.models import SpeedRegressor
+
 
 import os
 from numpy import random
@@ -19,8 +24,8 @@ if torch.cuda.is_available():
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, args, model, tokenizer, optimizers, train_dataloader, eval_dataloader, custom_args, discriminator, classifier_tokenizer):
-        super(CustomTrainer, self).__init__(args=args, model=model, tokenizer=tokenizer, optimizers=optimizers)
+    def __init__(self, args, model, tokenizer, train_dataloader, eval_dataloader, custom_args, discriminator, classifier_tokenizer):
+        super(CustomTrainer, self).__init__(args=args, model=model, tokenizer=tokenizer)
         self.custom_args = custom_args
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
@@ -37,6 +42,7 @@ class CustomTrainer(Trainer):
 
     def training_step(self, model, inputs):
         model.train()
+        print(inputs)
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
@@ -83,7 +89,7 @@ if __name__ == "__main__":
     custom_args.discriminator_name = 'bart'
 
     custom_args.generator = 'Zohar/distilgpt2-finetuned-restaurant-reviews-clean'
-    custom_args.discriminator_path = os.path.join(os.environ['PROJECT'], "/control_tuning/speed_control/checkpoint_6_0_False_5e-05_2_0.8_3_0.001")
+    custom_args.discriminator_path = os.environ['PROJECT'] + "/control_tuning/speed_control/checkpoint_6_0_False_5e-05_2_0.8_3_0.001"
 
     custom_args.total_steps = 10000
     # custom_args.max_q = max_q
@@ -94,7 +100,7 @@ if __name__ == "__main__":
     os.environ['MASTER_PORT'] = '12360'
 
     discriminator = SpeedRegressor()
-    discriminator = torch.load(custom_args.discriminator_path)
+    discriminator.load_state_dict(torch.load(custom_args.discriminator_path))
 
     # sd = torch.load(custom_args.persuasivness_clasifier_path'])['state_dict
     # state_dict = {key.replace('module.','') : value for key, value in sd.items()}
@@ -118,16 +124,18 @@ if __name__ == "__main__":
     device = torch.device('cuda', custom_args.local_rank)
 
     print('Loading data...')
-    train_dataloader, eval_dataloader, max_r = prepare_data_seq(
-        custom_args.training_data,
-        custom_args.eval_data,
+    train_dataloader, eval_dataloader, max_r, switch = prepare_data_seq(
+        os.environ['PROJECT'] + custom_args.training_data,
+        os.environ['PROJECT'] + custom_args.eval_data,
         custom_args.batch_size,
         thd=custom_args.thd
     )
 
+    special_tokens = list(switch.values())
+
     print(f'Dataloader len {len(train_dataloader)}, max_r {max_r}')
 
-    print('Loading gpt model...')
+    print('Loading generative model...')
     config = AutoConfig.from_pretrained(
         custom_args.generator, output_hidden_states=True, output_attentions=True)
     config.pad_token_id = config.eos_token_id
@@ -135,6 +143,10 @@ if __name__ == "__main__":
     decoder = AutoModelWithLMHead.from_pretrained(custom_args.generator, config=config)
     tokenizer = AutoTokenizer.from_pretrained(custom_args.generator)
     tokenizer.pad_token = tokenizer.eos_token
+    
+    print('Adding special tokens and adjusting model')
+    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
+    decoder.resize_token_embeddings(len(tokenizer))
     
     discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base")
     
@@ -168,7 +180,7 @@ if __name__ == "__main__":
         args=training_args,
         model=decoder,
         tokenizer=tokenizer,
-        optimizers=(optimizer, lr_scheduler),
+        # optimizers=(optimizer, lr_scheduler),
         train_dataloader=train_dataloader,
         eval_dataloader=eval_dataloader,
         custom_args=custom_args,

@@ -19,10 +19,10 @@ def get_args():
     parser.add_argument('--hidden_size', type=int, default=768, help="hidden size")
     parser.add_argument('--dropout', type=float, default=0.0, help="dropout rate")
 
-    parser.add_argument('--generator', type=str, default="gpt2", help="load existing generator") 
+    parser.add_argument('--generator', type=str, default="facebook/bart-base", help="load existing generator") 
     parser.add_argument('--discriminator_path', type=str, default="ckpt.pth", help="load existing discriminator") 
-    parser.add_argument('--training_data', type=str, default="dataset/persuasive_pairs_data_train.txt", help="training data") 
-    parser.add_argument('--eval_data', type=str, default="dataset/16k_cmv_train.txt", help="eval data") 
+    parser.add_argument('--training_data', type=str, default="/control_tuning/dataset/train.txt", help="training data") 
+    parser.add_argument('--eval_data', type=str, default="/control_tuning/dataset/eval.txt", help="eval data") 
 
     parser.add_argument('--save_path', type=str, default="/projects/bblr/smoorjani", help="save path") 
     
@@ -50,7 +50,7 @@ def get_args():
 
 
     ## other args
-    args = vars(parser.parse_args())
+    args = parser.parse_args()
     assert args.thd is not None
     logging.info(args)
 
