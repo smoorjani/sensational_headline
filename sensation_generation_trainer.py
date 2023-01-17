@@ -42,7 +42,6 @@ class CustomTrainer(Trainer):
 
     def training_step(self, model, inputs):
         model.train()
-        print(inputs)
         inputs = self._prepare_inputs(inputs)
 
         with self.autocast_smart_context_manager():
@@ -147,8 +146,8 @@ if __name__ == "__main__":
     print('Adding special tokens and adjusting model')
     tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
     decoder.resize_token_embeddings(len(tokenizer))
-    
-    discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base")
+
+    discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", add_prefix_space=True)
     
     optimizer = None
     if custom_args.optimizer.lower() == 'adam':
@@ -171,6 +170,7 @@ if __name__ == "__main__":
     
     dschf = HfDeepSpeedConfig(custom_args.ds_config)
     engine, optimizer, training_dataloader, lr_scheduler = deepspeed.initialize(model=decoder, config_params=custom_args.ds_config, optimizer=optimizer)
+    
     # torch.distributed.init_process_group(backend='nccl')
     # decoder = DataParallelModel(decoder, device_ids=[0,1])
     # decoder = torch.nn.parallel.DistributedDataParallel(decoder, device_ids=[custom_args.local_rank']], output_device=custom_args['local_rank)

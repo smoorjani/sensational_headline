@@ -7,7 +7,7 @@ from dutils.sensation_scorer import get_reward
 from dutils.config import *
 
 def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenizer, hidden_size=768):
-    print('Running RL loss...')
+    # print('Running RL loss...')
     device = torch.device('cuda', args.local_rank)
     inputs, _, batch_size = init_batch(tokenizer, batch, device=device)
 
@@ -30,7 +30,7 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
 
         gold_probs = torch.gather(
             final_dist, 1, target.unsqueeze(1)).squeeze()  
-        step_loss = -torch.log(gold_probs + args.eps)
+        step_loss = -torch.log(gold_probs + args.eps) # log P(w_t)
         
         step_loss = step_loss * step_mask
         all_step_mask.append(step_mask)
@@ -46,8 +46,8 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
     reward = get_reward(
         decoded_sents, batch['target_txt'], batch['deltas'], discriminator, classifier_tokenizer, device)
 
-    reward = reward.unsqueeze(1)
-    sum_losses = torch.sum(reward * torch.stack(step_losses, 1), 1)
+    # multiply by reward
+    sum_losses = torch.sum(reward.squeeze(0) * torch.stack(step_losses, 1), 1)
 
     batch_avg_loss = sum_losses/dec_lens_var.float()
     value_mse_loss = torch.mean(batch_avg_loss)
@@ -57,7 +57,7 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
     return mle_loss + args.gamma * value_mse_loss
 
 def get_mle_loss(args, batch, decoder, tokenizer):
-    print('Running MLE loss...')
+    # print('Running MLE loss...')
     # calculates MLE loss
     device = torch.device('cuda', args.local_rank)
     inputs, targets, _ = init_batch(tokenizer, batch, device=device)

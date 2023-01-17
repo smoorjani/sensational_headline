@@ -21,9 +21,15 @@ def get_reward(decoded_sents, target_sents, deltas, discriminator, tokenizer, de
     if device is None:
         device = "cuda"
 
-    generated_batch = truncate_batch(tokenizer(decoded_sents, return_tensors='pt', padding=True))
-    target_batch = truncate_batch(tokenizer(target_sents, return_tensors='pt', padding=True))
-    
+    generated_batch = tokenizer(
+        decoded_sents, return_tensors='pt', padding='max_length', truncation=True,
+        is_split_into_words=True, max_length=512
+    )
+
+    target_batch = tokenizer(
+        target_sents, return_tensors='pt', padding='max_length', truncation=True,
+        max_length=512
+    )
 
     if USE_CUDA:
         staging_device = next(discriminator.parameters()).device
@@ -40,7 +46,8 @@ def get_reward(decoded_sents, target_sents, deltas, discriminator, tokenizer, de
         print(f'decoded_lens: {[len(sent) for sent in decoded_sents]}')
         raise RuntimeError
 
-    rewards = torch.norm(target_values - generated_values)
+    # no need for norm here, it is done in get_loss (see `sum_losses`)
+    rewards = target_values - generated_values
 
     # ratio of unique words to words. not sure if this is needed
     # w = torch.FloatTensor([len(set(word_list)) * 1. / len(word_list)

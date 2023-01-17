@@ -4,7 +4,7 @@ class Switch(dict):
     def __getitem__(self, item):
         for key in self.keys():                 # iterate over the intervals
             # if item in key:                     # if the argument is in that interval
-            if key[0] <= item < key[1]:
+            if key[0 if item >= 0 else 1] <= item < key[1 if item >= 0 else 0]:
                 return super().__getitem__(key) # return its associated value
         raise KeyError(item)                    # if not in any interval, raise KeyError
 

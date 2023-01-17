@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument('--training_data', type=str, default="/control_tuning/dataset/train.txt", help="training data") 
     parser.add_argument('--eval_data', type=str, default="/control_tuning/dataset/eval.txt", help="eval data") 
 
-    parser.add_argument('--save_path', type=str, default="/projects/bblr/smoorjani", help="save path") 
+    parser.add_argument('--save_path', type=str, default="/projects/bblr/smoorjani/control_tuning/models", help="save path") 
     
     ## optimization
     
