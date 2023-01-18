@@ -4,7 +4,7 @@ class Switch(dict):
     def __getitem__(self, item):
         for key in self.keys():                 # iterate over the intervals
             # if item in key:                     # if the argument is in that interval
-            if key[0 if item >= 0 else 1] <= item < key[1 if item >= 0 else 0]:
+            if key[0] <= item < key[1]:
                 return super().__getitem__(key) # return its associated value
         raise KeyError(item)                    # if not in any interval, raise KeyError
 
@@ -29,20 +29,29 @@ def get_default_switch(deltas, num_bins=10, zero_thd=1e-4):
         dir_char = 'P' if multiplier == 1 else 'N'
         for i in range(len(boundaries)):
             if i+1 == len(boundaries):
-                range_dict[(deltas[boundaries[i]], multiplier * float('inf'))] = f'<SPEED_{dir_char}{i+1}>'
+                a = deltas[boundaries[i]]
+                b = multiplier * float('inf')
+                r = (a, b) if dir_char == 'P' else(b, a)
+                range_dict[r] = f'<SPEED_{dir_char}{i+1}>'
             elif i+1 == 1:
-                range_dict[(multiplier * zero_thd, deltas[boundaries[i+1]])] = f'<SPEED_{dir_char}{i+1}>'
+                a = multiplier * zero_thd
+                b = deltas[boundaries[i+1]]
+                r = (a, b) if dir_char == 'P' else(b, a)
+                range_dict[r] = f'<SPEED_{dir_char}{i+1}>'
             else:
-                range_dict[(deltas[boundaries[i]], deltas[boundaries[i+1]])] = f'<SPEED_{dir_char}{i+1}>'
+                a = deltas[boundaries[i]]
+                b = deltas[boundaries[i+1]]
+                r = (a, b) if dir_char == 'P' else(b, a)
+                range_dict[r] = f'<SPEED_{dir_char}{i+1}>'
 
         return range_dict
 
     range_dict = create_ranges(range_dict, pos_deltas, num_pos_bins, 1)
     neg_deltas.reverse()
     range_dict = create_ranges(range_dict, neg_deltas, num_neg_bins, -1)
-
+    print(range_dict)
     default_switch = Switch(range_dict)
-
+    
     return default_switch
 
 def harmonic_mean(r1, r2, beta):
