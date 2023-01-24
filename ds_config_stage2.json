@@ -37,7 +37,7 @@
         "type": "WarmupLR",
         "params": {
             "warmup_min_lr": 0,
-            "warmup_max_lr": 1e-4,
+            "warmup_max_lr": 5e-4,
             "warmup_num_steps": 0
         }
     },
@@ -45,6 +45,6 @@
 
     "gradient_accumulation_steps": 1,
     "gradient_clipping": "auto",
-    "train_batch_size": 2,
-    "train_micro_batch_size_per_gpu": 1
+    "train_batch_size": 16,
+    "train_micro_batch_size_per_gpu": 8
 }

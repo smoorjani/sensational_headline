@@ -1,6 +1,14 @@
 import torch
 import transformers
-from transformers import Trainer, GPT2Tokenizer, GPT2LMHeadModel, GPT2Config, BertTokenizer, TrainingArguments, get_scheduler, AutoTokenizer, AutoModelWithLMHead, AutoConfig
+from transformers import (
+    Trainer,
+    TrainingArguments,
+    get_scheduler,
+    AutoTokenizer,
+    AutoModelWithLMHead,
+    AutoConfig
+)
+from torch.utils.tensorboard import SummaryWriter
 
 import deepspeed
 from transformers.deepspeed import HfDeepSpeedConfig
@@ -8,7 +16,8 @@ from transformers.deepspeed import HfDeepSpeedConfig
 from dutils.config import USE_CUDA, get_args
 from dutils.losses import get_loss
 from dutils.function import Switch
-from dutils.data_utils import prepare_data_seq
+from dutils.data_utils import prepare_data_seq, collate_fn
+from dutils.evaluation import compute_metrics
 
 import sys
 sys.path.append("..")
@@ -24,15 +33,33 @@ if torch.cuda.is_available():
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, args, model, tokenizer, train_dataloader, eval_dataloader, custom_args, discriminator, classifier_tokenizer):
-        super(CustomTrainer, self).__init__(args=args, model=model, tokenizer=tokenizer)
+    def __init__(
+        self,
+        args,
+        model,
+        tokenizer,
+        train_dataloader,
+        eval_dataloader,
+        custom_args,
+        discriminator,
+        classifier_tokenizer,
+        compute_metrics,
+        callbacks
+    ):
+        super(CustomTrainer, self).__init__(
+            args=args,
+            model=model,
+            tokenizer=tokenizer,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks
+        )
+
         self.custom_args = custom_args
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
 
         self.discriminator = discriminator
         self.classifier_tokenizer = classifier_tokenizer
-        
 
     def get_train_dataloader(self):
         return self.train_dataloader
@@ -90,13 +117,12 @@ if __name__ == "__main__":
     custom_args.generator = 'Zohar/distilgpt2-finetuned-restaurant-reviews-clean'
     custom_args.discriminator_path = os.environ['PROJECT'] + "/control_tuning/speed_control/checkpoint_6_0_False_5e-05_2_0.8_3_0.001"
 
-    custom_args.total_steps = 10000
+    # custom_args.total_steps = 20000
     # custom_args.max_q = max_q
     # setting max decoding length
     custom_args.max_r = 40
-    
 
-    os.environ['MASTER_PORT'] = '12360'
+    os.environ['MASTER_PORT'] = '12370'
 
     discriminator = SpeedRegressor()
     discriminator.load_state_dict(torch.load(custom_args.discriminator_path))
@@ -105,9 +131,27 @@ if __name__ == "__main__":
     # state_dict = {key.replace('module.','') : value for key, value in sd.items()}
     # discriminator.load_state_dict(state_dict)
 
+    ckpt_name = (
+            f"model_{custom_args.generator_name}_{custom_args.hidden_size}_{custom_args.discriminator_name}"
+            f"_{custom_args.gamma}_{custom_args.total_steps}_{custom_args.batch_size}_{custom_args.optimizer}"
+            f"_{custom_args.lr}_{custom_args.weight_decay}_{custom_args.max_grad_norm}_{custom_args.eps}"
+        )
+
+    checkpoint_path = os.path.join(
+        (os.environ['PROJECT'] + custom_args.save_path),
+        ckpt_name
+    )
+
+    tb_path = os.path.join((os.environ['PROJECT'] + custom_args.log_dir), ckpt_name)
+    # if not os.path.exists(tb_path):
+        # os.mkdir(tb_path)
+
+    writer = SummaryWriter(log_dir=tb_path)
+    callbacks = [transformers.integrations.TensorBoardCallback(writer)]
+
     training_args = TrainingArguments(
-        custom_args.save_path, 
-        per_device_train_batch_size=1,
+        output_dir=checkpoint_path,
+        per_device_train_batch_size=(custom_args.batch_size / torch.cuda.device_count()),
         save_steps=max(custom_args.total_steps // 5, 10000),
     #   gradient_accumulation_steps=8,
         num_train_epochs=custom_args.epochs,
@@ -116,7 +160,15 @@ if __name__ == "__main__":
         weight_decay=custom_args.weight_decay,
         max_grad_norm=custom_args.max_grad_norm,
         deepspeed=custom_args.ds_config,
-        fp16=True
+        fp16=True,
+        # evaluation
+        # evaluation_strategy="steps",
+        # eval_steps=10,
+        # logging to tensorboard
+        report_to="tensorboard",
+        logging_strategy="steps",
+        logging_steps=10,
+
     )
 
     # print(training_args)
@@ -132,7 +184,7 @@ if __name__ == "__main__":
 
     special_tokens = list(switch.values())
 
-    print(f'Dataloader len {len(train_dataloader)}, max_r {max_r}')
+    # print(f'Dataloader len {len(train_dataloader)}, max_r {max_r}')
 
     print('Loading generative model...')
     config = AutoConfig.from_pretrained(
@@ -169,7 +221,13 @@ if __name__ == "__main__":
         decoder = decoder.to(device)
     
     dschf = HfDeepSpeedConfig(custom_args.ds_config)
-    engine, optimizer, training_dataloader, lr_scheduler = deepspeed.initialize(model=decoder, config_params=custom_args.ds_config, optimizer=optimizer)
+    engine, optimizer, train_dataloader, lr_scheduler = deepspeed.initialize(
+        model=decoder,
+        config_params=custom_args.ds_config,
+        optimizer=optimizer,
+        training_data=train_dataloader,
+        collate_fn=collate_fn
+    )
     
     # torch.distributed.init_process_group(backend='nccl')
     # decoder = DataParallelModel(decoder, device_ids=[0,1])
@@ -180,26 +238,20 @@ if __name__ == "__main__":
         args=training_args,
         model=decoder,
         tokenizer=tokenizer,
-        # optimizers=(optimizer, lr_scheduler),
+        # optimizers=(optimizer, lr_scheduler), # doesn't work with deepspeed
         train_dataloader=train_dataloader,
         eval_dataloader=eval_dataloader,
         custom_args=custom_args,
         discriminator=discriminator,
         classifier_tokenizer=discriminator_tokenizer,
+        compute_metrics=compute_metrics,
+        callbacks=callbacks,
     )
 
     torch.cuda.empty_cache()
     transformers.logging.set_verbosity_info()
-    checkpoint_path = os.path.join(
-        custom_args.save_path,
-        (
-            f"checkpoint_{custom_args.generator_name}_{custom_args.hidden_size}_{custom_args.discriminator_name}"
-            f"_{custom_args.gamma}_{custom_args.total_steps}_{custom_args.batch_size}_{custom_args.optimizer}"
-            f"_{custom_args.lr}_{custom_args.weight_decay}_{custom_args.max_grad_norm}_{custom_args.eps}"
-        )
-    )
-
-    if os.path.exists(checkpoint_path):
+    
+    if os.path.exists(checkpoint_path) and os.path.isfile(os.path.join(checkpoint_path, 'pytorch_model.bin')):
         train_result = trainer.train(checkpoint_path)
     else:
         train_result = trainer.train()

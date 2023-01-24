@@ -22,8 +22,8 @@ class Dataset(data.Dataset):
     def __getitem__(self, idx):
 
         item = {}
-        item["delta"] = self.s_seq[idx]
-        special_token = self.switch[float(item["delta"])]
+        item["deltas"] = float(self.s_seq[idx])
+        special_token = self.switch[item["deltas"]]
         item["input_txt"] = special_token + " " + self.x_seq[idx]
         item["target_txt"] = self.y_seq[idx]
 
@@ -37,9 +37,9 @@ def collate_fn(data):
     for key in data[0].keys():
         item_info[key] = [d[key] for d in data]
     
-    deltas = Variable(torch.FloatTensor(item_info["delta"]))
-    if USE_CUDA:
-        deltas = deltas.to("cuda")
+    deltas = Variable(torch.FloatTensor(item_info["deltas"]))
+    # if USE_CUDA:
+        # deltas = deltas.to("cuda")
 
     d = {}
     d["input_txt"] = item_info["input_txt"]
@@ -63,7 +63,7 @@ def get_seq(data, batch_size, max_len, switch, shuffle=True):
     data_loader = torch.utils.data.DataLoader(dataset=dataset, batch_size=batch_size, 
         shuffle=shuffle, collate_fn=collate_fn)
     
-    return data_loader
+    return dataset, data_loader
 
 def read_langs(file_name, thd=0.0):
 
@@ -111,9 +111,9 @@ def prepare_data_seq(train_file, test_file, batch_size, shuffle=True, thd=None, 
     
     logging.info("start get seq for train")
     max_len = None
-    train = get_seq(d_train, batch_size, max_len, switch, shuffle=shuffle)
+    train_dataset, train = get_seq(d_train, batch_size, max_len, switch, shuffle=shuffle)
     logging.info("start get seq for test")
-    test = get_seq(d_test, batch_size, max_len, switch, shuffle=False)
+    _, test = get_seq(d_test, batch_size, max_len, switch, shuffle=False)
  
-    return train, test, max_r, switch
+    return train_dataset, test, max_r, switch
 

@@ -24,12 +24,13 @@ def get_args():
     parser.add_argument('--training_data', type=str, default="/control_tuning/dataset/train.txt", help="training data") 
     parser.add_argument('--eval_data', type=str, default="/control_tuning/dataset/eval.txt", help="eval data") 
 
-    parser.add_argument('--save_path', type=str, default="/projects/bblr/smoorjani/control_tuning/models", help="save path") 
-    
+    parser.add_argument('--save_path', type=str, default="/control_tuning/models", help="save path") 
+    parser.add_argument('--log_dir', type=str, default="/control_tuning/logs", help="save path") 
+
     ## optimization
     
     parser.add_argument('--epochs', type=int, default=10, help="epochs for runing")
-    parser.add_argument('--total_steps', type=int, default=100000000, help="total steps for training")
+    parser.add_argument('--total_steps', type=int, default=10000, help="total steps for training")
     parser.add_argument('--optimizer', type=str, default="adam", help="which optimizer to use")
     parser.add_argument('--lr', type=float, default=1e-4, help="learning rate")
     parser.add_argument('--weight_decay', type=float, default=1e-4, help="weight decay for optimizer")

@@ -49,7 +49,6 @@ def get_default_switch(deltas, num_bins=10, zero_thd=1e-4):
     range_dict = create_ranges(range_dict, pos_deltas, num_pos_bins, 1)
     neg_deltas.reverse()
     range_dict = create_ranges(range_dict, neg_deltas, num_neg_bins, -1)
-    print(range_dict)
     default_switch = Switch(range_dict)
     
     return default_switch

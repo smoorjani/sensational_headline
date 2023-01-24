@@ -7,6 +7,18 @@ from dutils.sensation_scorer import get_reward
 
 from dutils.rouge import rouge
 
+def compute_metrics(eval_pred):
+    # Predictions and labels are grouped in a namedtuple called EvalPrediction
+    predictions, labels = eval_pred
+
+    print(predictions, labels)
+
+    results = {}
+
+    # results: a dictionary with string keys (the name of the metric) and float
+    # values (i.e. the metric values)
+    return results
+
 class Evaluation():
     def __init__(self, decoder, tokenizer, classifier_tokenizer):
         self.decoder = decoder
