@@ -5,7 +5,7 @@ import torch
 import torch.utils.data as data
 
 from transformers import AutoTokenizer
-from transformers.models.bart.modeling_bart import shift_tokens_right
+# from transformers.models.bart.modeling_bart import shift_tokens_right
 
 from nltk.corpus import stopwords
 
@@ -198,14 +198,13 @@ class DeltaDataset(data.Dataset):
             # labels["input_ids"] = [
             #     [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
             # ]
+            # labels["input_ids"] = [(l if l != self.tokenizer.pad_token_id else -100) for l in labels["input_ids"]]
             labels["input_ids"] = [(l if l != self.tokenizer.pad_token_id else -100) for l in labels["input_ids"]]
             # labels[labels[:, :] == self.tokenizer.pad_token_id] = -100
 
         model_inputs["labels"] = labels["input_ids"]
         # model_inputs["labels_attn"] = labels["attention_mask"]
 
-        # decoder_input_ids = shift_tokens_right(labels, self.tokenizer.pad_token_id, self.tokenizer.eos_token_id)
-        # model_inputs["decoder_input_ids"] = decoder_input_ids
         # model_inputs["decoder_input_ids"] = labels
 
         # model_inputs = {key: item.squeeze(0) for key, item in model_inputs.items()}

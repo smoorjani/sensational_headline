@@ -43,28 +43,28 @@ def get_tuning_loss(args, batch, decoder, tokenizer, discriminator_utils, direct
 
     decoded_sents = tokenizer.batch_decode(outputs, skip_special_tokens=True)
     
-    targets = []
-    for i in range(batch_size):
-        # target = batch['labels'][i]
-        target = batch['input_ids'][i]
-        target[target == -100] = tokenizer.pad_token_id
-        targets.append(target)
+    # targets = []
+    # for i in range(batch_size):
+    #     # target = batch['labels'][i]
+    #     target = batch['input_ids'][i]
+    #     target[target == -100] = tokenizer.pad_token_id
+    #     targets.append(target)
 
-    target_sents = tokenizer.batch_decode(targets, skip_special_tokens=True)
+    # target_sents = tokenizer.batch_decode(targets, skip_special_tokens=True)
 
     reward = None
     if args.use_discriminator:
         discriminator, classifier_tokenizer = discriminator_utils
         reward = get_discriminator_reward(
-            decoded_sents,
-            target_sents,
-            batch['input_speeds'],
-            batch['deltas'],
             discriminator,
             classifier_tokenizer,
-            precomputed=False,
+            decoded_sents,
+            batch['deltas'],
+            precomputed=True,
+            input_speeds=batch['input_speeds'],
             device=device
         )
+        
     else:
         ft_model, stemmer, en_stop = direct_comp_utils
         reward = get_computed_reward(

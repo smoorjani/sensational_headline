@@ -26,6 +26,7 @@ from dutils.function import Switch
 from dutils.data_utils import prepare_data_seq, collate_fn, get_data
 
 import ssl
+import json
 import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
@@ -38,7 +39,7 @@ from speed_control.models import SpeedRegressor
 
 import os
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 
 class CustomTrainer(Trainer):
@@ -110,31 +111,29 @@ class CustomTrainer(Trainer):
         device = torch.device('cuda', self.custom_args.local_rank)
         inputs = {key: item.to(device) for key, item in inputs.items()}
 
-        # out = decoder(
-        if self.custom_args.control_method == 'emb':
-            out = model(
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask'],
-                decoder_input_ids=None,
-                labels=inputs['labels'],
-                control=inputs['deltas']
-            )
+        nll_loss = torch.tensor(0., requires_grad=True).to(device)
+        if custom_args.gamma != 1:
+            if self.custom_args.control_method == 'emb':
+                out = model(
+                    input_ids=inputs['input_ids'],
+                    attention_mask=inputs['attention_mask'],
+                    decoder_input_ids=None,
+                    labels=inputs['labels'],
+                    control=inputs['deltas']
+                )
         
-        for k, v in inputs.items():
-            print(f'{k}, {v.shape}, {v}')
+            else:
+                out = model(
+                    input_ids=inputs['input_ids'],
+                    attention_mask=inputs['attention_mask'],
+                    decoder_input_ids=None,
+                    # decoder_input_ids=inputs['decoder_input_ids'],
+                    labels=inputs['labels']
+                )
 
-        else:
-            out = model(
-                input_ids=inputs['input_ids'],
-                attention_mask=inputs['attention_mask'],
-                decoder_input_ids=None,
-                # decoder_input_ids=inputs['decoder_input_ids'],
-                labels=inputs['labels']
-            )
+            nll_loss = (1 - self.custom_args.gamma) * out.loss
 
-        loss = (1 - self.custom_args.gamma) * out.loss
-
-        tuning_loss = 0
+        tuning_loss = torch.tensor(0., requires_grad=True).to(device)
         if custom_args.gamma:
             tuning_loss, output_ids = get_tuning_loss(
                 self.custom_args,
@@ -145,9 +144,10 @@ class CustomTrainer(Trainer):
                 self.direct_comp_utils
             )
 
-            loss += self.custom_args.gamma * tuning_loss
+            tuning_loss = self.custom_args.gamma * tuning_loss
 
-        print(f'Total Loss: {loss}, MLE: {out.loss}, Tuning: {tuning_loss}')
+        loss = nll_loss + tuning_loss
+        print(f'Total Loss: {loss}, NLL Loss: {nll_loss}, Tuning Loss: {tuning_loss}')
 
         outputs = None
         if return_outputs:
@@ -248,6 +248,14 @@ if __name__ == "__main__":
     writer = SummaryWriter(log_dir=tb_path)
     callbacks = [transformers.integrations.TensorBoardCallback(writer)]
 
+    with open(custom_args.ds_config, 'r') as f:
+        dschf = json.load(f)
+        dschf["train_batch_size"] = custom_args.batch_size
+        dschf["train_micro_batch_size_per_gpu"] = int(custom_args.batch_size / torch.cuda.device_count())
+        dschf["scheduler"]["params"]["warmup_max_lr"] = custom_args.lr
+
+    print(dschf)
+
     training_args = TrainingArguments(
         output_dir=checkpoint_path,
         per_device_train_batch_size=(custom_args.batch_size / torch.cuda.device_count()),
@@ -259,7 +267,8 @@ if __name__ == "__main__":
         learning_rate=custom_args.lr,
         weight_decay=custom_args.weight_decay,
         max_grad_norm=custom_args.max_grad_norm,
-        deepspeed=custom_args.ds_config,
+        # deepspeed=custom_args.ds_config,
+        deepspeed=dschf,
         fp16=True,
         # evaluation
         evaluation_strategy="steps",
@@ -269,6 +278,7 @@ if __name__ == "__main__":
         report_to="tensorboard",
         logging_strategy="steps",
         logging_steps=100,
+        # debug="underflow_overflow"
 
     )
 
@@ -367,10 +377,10 @@ if __name__ == "__main__":
     if USE_CUDA:
         decoder = decoder.to(device)
     
-    dschf = HfDeepSpeedConfig(custom_args.ds_config)
+    # dschf = HfDeepSpeedConfig(custom_args.ds_config)
     engine, optimizer, train_dataloader, lr_scheduler = deepspeed.initialize(
         model=decoder,
-        config_params=custom_args.ds_config,
+        config_params=dschf,
         optimizer=optimizer,
         training_data=train_dataloader,
         collate_fn=collate_fn
