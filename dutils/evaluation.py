@@ -1,23 +1,23 @@
+import nltk
 import logging
 import numpy as np
 
 from dutils.losses import get_prob
 from dutils.batch_utils import decode_batch
-from dutils.sensation_scorer import get_reward
+from dutils.sensation_scorer import get_discriminator_reward
 
 from dutils.rouge import rouge
 
-def compute_metrics(eval_pred):
-    # Predictions and labels are grouped in a namedtuple called EvalPrediction
-    predictions, labels = eval_pred
+def postprocess_text(preds, labels):
+    preds = [pred.strip() for pred in preds]
+    labels = [label.strip() for label in labels]
 
-    print(predictions, labels)
+    # rougeLSum expects newline after each sentence
+    preds = ["\n".join(nltk.sent_tokenize(pred)) for pred in preds]
+    labels = ["\n".join(nltk.sent_tokenize(label)) for label in labels]
 
-    results = {}
+    return preds, labels
 
-    # results: a dictionary with string keys (the name of the metric) and float
-    # values (i.e. the metric values)
-    return results
 
 class Evaluation():
     def __init__(self, decoder, tokenizer, classifier_tokenizer):
@@ -33,7 +33,7 @@ class Evaluation():
             num_tokens += len(tokens)
         return 1. - num_uni_tokens * 1.0 / num_tokens
 
-    def evaluate(self, args, dev, return_pred=False, discriminator=None):
+    def _evaluate(self, args, dev, return_pred=False, discriminator=None):
 
         logging.info("start evaluation")
         hyp = []

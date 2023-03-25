@@ -1,17 +1,131 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
+import torch.nn.functional as F
 
+from dutils.data_utils import truncate_tokenized
 from dutils.batch_utils import decoded_batch_to_txt, get_output_from_batch, init_batch, run_decoder
-from dutils.sensation_scorer import get_reward
+from dutils.sensation_scorer import get_computed_reward, get_discriminator_reward
+from dutils.masked_cross_entropy import sequence_mask
 from dutils.config import *
 
-def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenizer, hidden_size=768):
+from dutils.reward_utils.speed import compute_speeds
+
+def get_tuning_loss(args, batch, decoder, tokenizer, discriminator_utils, direct_comp_utils):
+    device = torch.device('cuda', args.local_rank)
+    batch_size = batch['target_speeds'].shape[0]
+
+    deltas = batch['deltas']
+    inputs = {
+        'input_ids': batch['input_ids'],
+        'attention_mask': batch['attention_mask']
+    }
+
+    outputs = None
+    if args.control_method == 'emb':
+        outputs = decoder.generate(
+            **inputs, 
+            min_length=args.max_len // 8,
+            max_length=args.max_len, 
+            num_beams=1, 
+            early_stopping=True,
+            pad_token_id=tokenizer.eos_token_id,
+            control=deltas # handled by model_specific_kwargs
+        )
+    else:
+        outputs = decoder.generate(
+            **inputs, 
+            min_length=args.max_len // 8,
+            max_length=args.max_len, 
+            num_beams=1, 
+            early_stopping=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    decoded_sents = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    
+    targets = []
+    for i in range(batch_size):
+        # target = batch['labels'][i]
+        target = batch['input_ids'][i]
+        target[target == -100] = tokenizer.pad_token_id
+        targets.append(target)
+
+    target_sents = tokenizer.batch_decode(targets, skip_special_tokens=True)
+
+    reward = None
+    if args.use_discriminator:
+        discriminator, classifier_tokenizer = discriminator_utils
+        reward = get_discriminator_reward(
+            decoded_sents,
+            target_sents,
+            batch['input_speeds'],
+            batch['deltas'],
+            discriminator,
+            classifier_tokenizer,
+            precomputed=False,
+            device=device
+        )
+    else:
+        ft_model, stemmer, en_stop = direct_comp_utils
+        reward = get_computed_reward(
+            decoded_sents,
+            batch['input_speeds'],
+            batch['deltas'],
+            compute_speeds,
+            kwargs={
+                'ft_model': ft_model,
+                'stemmer': stemmer,
+                'en_stop': en_stop
+            }
+        )
+
+    # mean squared rewards
+    return torch.norm(reward), outputs
+
+
+    # outputs = None
+    # enc_output = decoder(**inputs, output_hidden_states=True)
+    # del inputs['attention_mask']
+
+    # inputs['decoder_input_ids'] = torch.full((batch_size,1), tokenizer.bos_token_id).to(device)
+    # inputs['encoder_outputs'] = enc_output.encoder_last_hidden_state
+    # for i in range(len(inputs['encoder_outputs'])):
+    #     inputs['encoder_outputs'][i] = inputs['encoder_outputs'][i].to(device)
+
+    # for _ in range(args.max_len):
+    #     output = decoder(**inputs, output_hidden_states=True)
+
+    #     final_dist = output.logits[:, -1, :]
+        
+    #     next_token = None
+    #     if sampling == 'greedy':
+    #         next_token_scores = F.log_softmax(final_dist, dim=-1)
+    #         next_token = torch.argmax(next_token_scores, dim=-1)
+    #     else:
+    #         filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+    #         next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+
+    #     inputs["decoder_input_ids"] = torch.cat(
+    #         (
+    #             inputs["decoder_input_ids"],
+    #             next_token.unsqueeze(0).t()
+    #         ),
+    #         dim=1
+    #     )
+    #     outputs = inputs["decoder_input_ids"]
+
+    #     if torch.all(torch.any(inputs["decoder_input_ids"] == tokenizer.eos_token_id, 1)):
+    #         break
+
+def get_rl_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenizer):
     # print('Running RL loss...')
     device = torch.device('cuda', args.local_rank)
-    inputs, _, batch_size = init_batch(tokenizer, batch, device=device)
+    # batch = {key: item.to(device) for key, item in batch.items()}
+    # batch = {key: torch.stack(item).to(device) if type(item) == list else item.to(device) for key, item in batch.items()}
+    # inputs = {key: item.clone().detach() for key, item in batch.items()}
 
-    step_mask = Variable(torch.ones(batch_size)).float()
+    batch_size = batch['deltas'].shape[0]
+    step_mask = torch.ones(batch_size).float()
     
     if USE_CUDA:
         step_mask = step_mask.to(device)
@@ -19,6 +133,11 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
     all_step_mask = []
     all_targets = []
     step_losses = []
+
+    inputs = {
+        'input_ids': batch['input_ids'],
+        'attention_mask': batch['attention_mask']
+    }
 
     # in len of maximum size
     for di in range(args.max_r):
@@ -42,9 +161,21 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
     all_step_mask = torch.stack(all_step_mask, dim=1).float()
     dec_lens_var = torch.sum(all_step_mask, dim=1)
     
-    decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
+    # decoded_sents = decoded_batch_to_txt(tokenizer, all_targets)
+    
+    targets = []
+    for i in range(batch_size):
+        target = batch['labels'][i]
+        target[target == -100] = tokenizer.pad_token_id
+        targets.append(target)
+
+    target_sents = tokenizer.batch_decode(targets, skip_special_tokens=True)
+    decoded_sents = tokenizer.batch_decode(all_targets, skip_special_tokens=True)
+
+    print(target_sents, decoded_sents)
+
     reward = get_reward(
-        decoded_sents, batch['target_txt'], batch['deltas'], discriminator, classifier_tokenizer, device)
+        decoded_sents, target_sents, batch['deltas'], discriminator, classifier_tokenizer, device)
 
     # multiply by reward
     sum_losses = torch.sum(reward.squeeze(0) * torch.stack(step_losses, 1), 1)
@@ -52,21 +183,29 @@ def get_loss(args, batch, decoder, tokenizer, discriminator, classifier_tokenize
     batch_avg_loss = sum_losses/dec_lens_var.float()
     value_mse_loss = torch.mean(batch_avg_loss)
 
-    mle_loss = get_mle_loss(args, batch, decoder, tokenizer)
-
-    return mle_loss + args.gamma * value_mse_loss
+    return args.gamma * value_mse_loss
 
 def get_mle_loss(args, batch, decoder, tokenizer):
     # print('Running MLE loss...')
     # calculates MLE loss
     device = torch.device('cuda', args.local_rank)
-    inputs, targets, _ = init_batch(tokenizer, batch, device=device)
-    target_batch, dec_padding_mask, _, dec_lens_var = get_output_from_batch(
-        targets)
+    batch = {key: item.to(device) for key, item in batch.items()}
+    # batch = {key: torch.stack(item).to(device) if type(item) == list else item.to(device) for key, item in batch.items()}
+    # inputs = {key: item.clone().detach() for key, item in batch.items()}
+
+    dec_lens_var = torch.count_nonzero(batch['labels_attn'], dim=1)
+    max_dec_len = max(dec_lens_var)
+
+    # print(target_batch.size(1), dec_lens_var, max_dec_len)
+    # assert max_dec_len == target_batch.size(1)
+
+    dec_padding_mask = sequence_mask(
+        dec_lens_var, max_len=batch['labels'].size(1)).float()
 
     step_losses = []
 
-    for di in range(min(targets['input_ids'].shape[-1], args.max_r)):
+    for di in range(min(batch['labels'].shape[-1], args.max_r)):
+        # step loss is language modelling loss, computed over multiple steps
         inputs, _, _, _, step_loss = run_decoder(decoder, tokenizer, inputs, labels=inputs['input_ids'])
 
         step_mask = dec_padding_mask[:, di]
@@ -74,7 +213,7 @@ def get_mle_loss(args, batch, decoder, tokenizer):
         step_losses.append(step_loss)
 
         # Teacher forcing
-        inputs['input_ids'][:, -1] = targets['input_ids'][:, di]
+        inputs['input_ids'][:, -1] = batch['labels'][:, di]
 
     sum_losses = torch.sum(torch.stack(step_losses, 1), 1)
     batch_avg_loss = sum_losses/dec_lens_var.float()

@@ -1,55 +1,51 @@
 from transformers import LogitsProcessorList
 import torch
+import torch.nn.functional as F
 
 from dutils.masked_cross_entropy import sequence_mask
 from dutils.config import *
 
-def truncate_tokenized(inputs, max_len):
-    if inputs['input_ids'].shape[-1] > max_len:
-        for key, item in inputs.items():
-            batch_size, tokens = item.shape
-            new_item = torch.zeros(batch_size, max_len)
-            new_item = item[:, :max_len]
-            inputs[key] = new_item
-    return inputs
 
 def init_batch(tokenizer, batch, individual_tokenization=False, device=None, max_len=128):
     if device is None:
         device = "cuda"
+
     texts = batch['input_txt']
     target_texts = batch['target_txt']
 
     inputs, targets, batch_size = None, None, 0
-    if individual_tokenization:
-        inputs = [tokenizer(text, return_tensors="pt")
-                    for text in texts]
-        targets = [tokenizer(target, return_tensors="pt")
-                    for target in target_texts]
 
-        if USE_CUDA:
-            inputs = [{key: item.to(device)
-                        for key, item in inp.items()} for inp in inputs]
-            inputs = [
-                {key: item.to(device) for key, item in target.items()} for target in targets]
+    # if individual_tokenization:
+    #     inputs = [tokenizer(text, return_tensors="pt")
+    #                 for text in texts]
+    #     targets = [tokenizer(target, return_tensors="pt")
+    #                 for target in target_texts]
 
-        batch_size = len(inputs)
-    else:
-        tokenizer.padding_side = "left"
-        inputs = tokenizer(texts, return_tensors="pt", padding=True)
-        inputs = truncate_tokenized(inputs, max_len)
+    #     if USE_CUDA:
+    #         inputs = [{key: item.to(device)
+    #                     for key, item in inp.items()} for inp in inputs]
+    #         inputs = [
+    #             {key: item.to(device) for key, item in target.items()} for target in targets]
 
-        tokenizer.padding_side = "right"
-        targets = tokenizer(
-            target_texts, return_tensors="pt", padding=True)
-        # no need to truncate because of sliding window.
+    #     batch_size = len(inputs)
+    # else:
 
-        if USE_CUDA:
-            inputs = {key: item.to(device)
-                        for key, item in inputs.items()}
-            targets = {key: item.to(device)
-                        for key, item in targets.items()}
+    tokenizer.padding_side = "left"
+    inputs = tokenizer(texts, return_tensors="pt", padding=True)
+    inputs = truncate_tokenized(inputs, max_len)
 
-        batch_size = inputs['input_ids'].shape[0]
+    tokenizer.padding_side = "right"
+    targets = tokenizer(
+        target_texts, return_tensors="pt", padding=True)
+    # no need to truncate because of sliding window.
+
+    if USE_CUDA:
+        inputs = {key: item.to(device)
+                    for key, item in inputs.items()}
+        targets = {key: item.to(device)
+                    for key, item in targets.items()}
+
+    batch_size = inputs['input_ids'].shape[0]
 
     # padding should stay on the right for targets
     # this ensures it doesn't interfere with teacher forcing
@@ -63,13 +59,41 @@ def run_decoder(decoder, tokenizer, inputs, limit=64, labels=None):
     else:
         outputs = decoder(**inputs, labels=labels)
     # get next token
+
     final_dist = outputs.logits[:, -1, :]
-    logits_processor = LogitsProcessorList()
-    next_tokens_scores = logits_processor(inputs['input_ids'], final_dist)
+
+    logits_processor = decoder._get_logits_processor(
+            repetition_penalty = None,
+            no_repeat_ngram_size = 3, 
+            encoder_no_repeat_ngram_size = None,
+            encoder_input_ids = inputs['input_ids'],
+            bad_words_ids = None,
+            min_length = 8,
+            max_length = 64,
+            eos_token_id = tokenizer.eos_token_id,
+            forced_bos_token_id = None,
+            forced_eos_token_id = None,
+            prefix_allowed_tokens_fn = None,
+            num_beams = 1,
+            num_beam_groups = 1,
+            diversity_penalty = None,
+            remove_invalid_values = None,
+            input_ids_seq_length = inputs['input_ids'].shape[-1],
+            exponential_decay_length_penalty = None,
+            logits_processor = [],
+            renormalize_logits = None,
+        )
+    next_token_logits = logits_processor(inputs['input_ids'], final_dist)
+    next_token_scores = F.log_softmax(next_token_logits, dim=-1)
+
+    # next_token_scores, _indices = torch.sort(next_token_scores, descending=True, dim=1)
+    # next_tokens = torch.gather(next_token_scores, -1, _indices)
+    # print(next_tokens.shape)
+
     # TODO(RL Loss): try sampling
     # target = torch.multinomial(
         #     final_dist.data, 1).long().squeeze()  # sampling
-    next_tokens = torch.argmax(next_tokens_scores, dim=-1)
+    next_tokens = torch.argmax(next_token_scores, dim=-1)
 
     # appending next tokens to input_ids
     input_ids = torch.cat(

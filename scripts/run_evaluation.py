@@ -8,6 +8,7 @@ import pandas as pd
 from bert_score import score
 from datasets import load_metric
 from transformers import AutoModelWithLMHead, AutoTokenizer
+from transformers.models.bart_speed.modeling_sbart import SBartForConditionalGeneration
 
 from dutils.data_utils import read_langs
 from dutils.function import get_default_switch
@@ -61,7 +62,7 @@ def read_test_set(args):
         if args.limit > 0 and i == args.limit:
             break
         # remove for memorability
-        inp, target, target_delta = line.split('\t')
+        inp, s1, target, s2, target_delta = line.split('\t')
 
         inps.append(inp.strip())
         targets.append(target.strip())
@@ -73,19 +74,33 @@ def generate_predictions(args, inps, deltas, model, tokenizer, switch, logger):
     log_and_print("Generating predictions!", logger)
     outputs = []
     for inp, delta in zip(inps, deltas):
-        special_token = switch[float(delta)]
-        inp = special_token + " " + inp
+        if switch:
+            special_token = switch[float(delta)]
+            inp = special_token + " " + inp
 
         inputs = tokenizer(inp, return_tensors='pt').to(args.device)
-        output = model.generate(
-            **inputs, 
-            max_length=args.length, 
-            num_beams=args.beams, 
-            early_stopping=True,
-            pad_token_id=tokenizer.eos_token_id,
-            temperature=args.temperature,
-            repetition_penalty=args.repetition_penalty
-        )
+        output = None
+        if not switch:
+            output = model.generate(
+                **inputs, 
+                max_length=args.length, 
+                num_beams=args.beams, 
+                early_stopping=True,
+                pad_token_id=tokenizer.eos_token_id,
+                temperature=args.temperature,
+                repetition_penalty=args.repetition_penalty,
+                control=torch.tensor(delta) # handled by model_specific_kwargs
+            )
+        else:
+            output = model.generate(
+                **inputs, 
+                max_length=args.length, 
+                num_beams=args.beams, 
+                early_stopping=True,
+                pad_token_id=tokenizer.eos_token_id,
+                temperature=args.temperature,
+                repetition_penalty=args.repetition_penalty
+            )
 
         output = tokenizer.decode(output[0], skip_special_tokens=True)
         outputs.append(output)
@@ -152,14 +167,14 @@ if __name__ == '__main__':
         # MODELS_TO_USE = [args.model_name]
 
     model_scores = []
-    for model_name in glob.glob(MODEL_BASE_DIR + '/model_*'):
-        if '50000' in model_name:
-            continue
+    for model_name in glob.glob(MODEL_BASE_DIR + '/*'):
+        # if '50000' in model_name:
+        #     continue
 
         predictions = None
         prediction_path = os.path.join(
             GENERATIONS_BASE_DIR,
-            model_name.replace(MODEL_BASE_DIR, '').replace('/', '_') + \
+            model_name.replace(MODEL_BASE_DIR, '').replace('/', '_')[1:] + \
              f'_gen_{args.beams}_{args.temperature}_{args.repetition_penalty}_{args.top_k}_{args.top_p}' + '.txt'
         )
 
@@ -168,18 +183,27 @@ if __name__ == '__main__':
 
             with open(prediction_path, 'r') as f:
                 predictions = f.readlines()
-            predictions = [p for i, p in enumerate(predictions) if i % 2 == 1]
+            predictions = [p for i, p in enumerate(predictions) if i % 2 == 1 and i < len(targets) * 2]
 
         else:
             log_and_print(model_name + '\n', logger)
 
-            model = AutoModelWithLMHead.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
+            try:
+                model = None
+                if 'sbart' in model_name:
+                    model = SBartForConditionalGeneration.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
+                else:
+                    model = AutoModelWithLMHead.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
+            except OSError:
+                log_and_print(f"Can't load this model right now.", logger)
+                continue
             
-            predictions = generate_predictions(args, inps, deltas, model, tokenizer, switch, logger)
+            predictions = generate_predictions(args, inps, deltas, model, tokenizer, switch, logger) if 'sbart' not in model_name \
+                else generate_predictions(args, inps, deltas, model, tokenizer, None, logger)
 
             with open(prediction_path, 'w') as f:
                 for inp, pred in zip(inps, predictions):
-                    f.write(inp.strip() + '\n' + pred.strip() + '\n')
+                    f.write(inp.replace('\n', '').strip() + '\n' + pred.replace('\n', '').strip() + '\n')
 
             del model
 

@@ -17,9 +17,9 @@
 # module load anaconda3
 # conda init bash
 eval "$(conda shell.bash hook)"
-conda activate sen
+conda activate sen2
 
 cd /u/smoorjani/control_tuning/sensational_headline
-export PROJECT=/projects/bblr/smoorjani && export PYTHONPATH="${PYTHONPATH}:/u/smoorjani/sensational_headline"
+export PYTHONPATH="${PYTHONPATH}:/u/smoorjani/sensational_headline"
 
 python scripts/run_evaluation.py

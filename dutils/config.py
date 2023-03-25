@@ -15,18 +15,24 @@ def get_args():
     parser.add_argument('--local_rank', type=int, default=0, help="local rank")
 
     ## nn parameters
+    parser.add_argument('--max_len', type=int, default=256, help="max len")
     parser.add_argument('--batch_size', type=int, default=16, help="batch size")
     parser.add_argument('--hidden_size', type=int, default=768, help="hidden size")
     parser.add_argument('--dropout', type=float, default=0.0, help="dropout rate")
 
     parser.add_argument('--generator', type=str, default="facebook/bart-base", help="load existing generator") 
+    parser.add_argument('--gen_type', type=str, default="seq2seq", help="seq2seq or causal") 
     parser.add_argument('--discriminator_path', type=str, default="ckpt.pth", help="load existing discriminator") 
-    parser.add_argument('--training_data', type=str, default="/control_tuning/dataset/train.txt", help="training data") 
-    parser.add_argument('--eval_data', type=str, default="/control_tuning/dataset/eval.txt", help="eval data") 
+    parser.add_argument('--fasttext_model', type=str, default="/control_tuning/fasttext_model/wiki-news-300d-1M.vec", help="fasttext model") 
+    parser.add_argument('--use_discriminator', action='store_true', help='use trained discriminator instead of fasttext calculations')
+    parser.add_argument('--control_method', type=str, default="tag", help='whether to use special tag or control embedding')
+
+    parser.add_argument('--training_data', type=str, default="/control_tuning/yelpdata/pretraining_data/train.txt", help="training data") 
+    parser.add_argument('--eval_data', type=str, default="/control_tuning/yelpdata/pretraining_data/val.txt", help="eval data") 
 
     parser.add_argument('--save_path', type=str, default="/control_tuning/models", help="save path") 
     parser.add_argument('--log_dir', type=str, default="/control_tuning/logs", help="save path") 
-
+    parser.add_argument('--notes', type=str, default="", help="extra notes to add to saved model name")
     ## optimization
     
     parser.add_argument('--epochs', type=int, default=10, help="epochs for runing")

@@ -3,3 +3,12 @@ numpy
 torch
 deepspeed
 argparse
+evaluate
+nltk
+pandas
+tensorboard
+gensim
+contractions
+accelerate
+rouge_score
+bert_score
