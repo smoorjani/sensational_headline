@@ -23,14 +23,14 @@ cd /u/smoorjani/control_tuning/sensational_headline/bart_pretraining
 
 export HF_DATASETS_CACHE=/projects/bblr/smoorjani/huggingface_cache
 export MODEL_TYPE="bart-base"
-export BOS=1
+export BOS=0
 
 if [ $BOS == 0 ]; then
     python bart_pretrainer.py \
         --model_name_or_path facebook/$MODEL_TYPE \
         --train_file /projects/bblr/smoorjani/control_tuning/yelpdata/pretraining_data/train.json \
         --validation_file /projects/bblr/smoorjani/control_tuning/yelpdata/pretraining_data/val.json \
-        --output_dir /projects/bblr/smoorjani/control_tuning/pretrained_bart/$MODEL_TYPE \
+        --output_dir /projects/bblr/smoorjani/control_tuning/pretrained_bart/t$MODEL_TYPE \
         --overwrite_output_dir \
         --per_device_train_batch_size=8 \
         --per_device_eval_batch_size=8 \

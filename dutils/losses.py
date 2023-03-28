@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import random
 
 from dutils.data_utils import truncate_tokenized
 from dutils.batch_utils import decoded_batch_to_txt, get_output_from_batch, init_batch, run_decoder
@@ -42,6 +43,8 @@ def get_tuning_loss(args, batch, decoder, tokenizer, discriminator_utils, direct
         )
 
     decoded_sents = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    if random.randint(0, 100) < 5:
+        print(decoded_sents)
     
     # targets = []
     # for i in range(batch_size):

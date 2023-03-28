@@ -8,11 +8,14 @@ from transformers import (
     Seq2SeqTrainer,
     TrainingArguments,
     Seq2SeqTrainingArguments,
+    DataCollatorForSeq2Seq,
     get_scheduler,
     AutoTokenizer,
     AutoModelWithLMHead,
     AutoModelForSeq2SeqLM,
-    AutoConfig
+    AutoConfig,
+    BartForSequenceClassification,
+    RobertaForSequenceClassification
 )
 from torch.utils.tensorboard import SummaryWriter
 
@@ -42,12 +45,13 @@ import os
 # torch.autograd.set_detect_anomaly(True)
 
 
-class CustomTrainer(Trainer):
+class CustomTrainer(Seq2SeqTrainer):
     def __init__(
         self,
         args,
         model,
         tokenizer,
+        data_collator,
         train_dataloader,
         eval_dataloader,
         custom_args,
@@ -60,6 +64,7 @@ class CustomTrainer(Trainer):
             args=args,
             model=model,
             tokenizer=tokenizer,
+            data_collator=data_collator,
             compute_metrics=compute_metrics,
             callbacks=callbacks
         )
@@ -111,8 +116,14 @@ class CustomTrainer(Trainer):
         device = torch.device('cuda', self.custom_args.local_rank)
         inputs = {key: item.to(device) for key, item in inputs.items()}
 
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+
+        outputs = {}
         nll_loss = torch.tensor(0., requires_grad=True).to(device)
-        if custom_args.gamma != 1:
+        if return_outputs or custom_args.gamma != 1:
             if self.custom_args.control_method == 'emb':
                 out = model(
                     input_ids=inputs['input_ids'],
@@ -121,6 +132,7 @@ class CustomTrainer(Trainer):
                     labels=inputs['labels'],
                     control=inputs['deltas']
                 )
+                outputs = out
         
             else:
                 out = model(
@@ -130,11 +142,12 @@ class CustomTrainer(Trainer):
                     # decoder_input_ids=inputs['decoder_input_ids'],
                     labels=inputs['labels']
                 )
+                outputs = out
 
             nll_loss = (1 - self.custom_args.gamma) * out.loss
 
         tuning_loss = torch.tensor(0., requires_grad=True).to(device)
-        if custom_args.gamma:
+        if return_outputs or custom_args.gamma:
             tuning_loss, output_ids = get_tuning_loss(
                 self.custom_args,
                 inputs,
@@ -145,14 +158,27 @@ class CustomTrainer(Trainer):
             )
 
             tuning_loss = self.custom_args.gamma * tuning_loss
+            outputs['generated'] = output_ids
 
         loss = nll_loss + tuning_loss
-        print(f'Total Loss: {loss}, NLL Loss: {nll_loss}, Tuning Loss: {tuning_loss}')
+        print(f'Total Loss: {loss}, NLL Loss: {nll_loss}, Tuning Loss: {tuning_loss}')            
 
-        outputs = None
-        if return_outputs:
-            outputs = out
-            outputs['generated'] = output_ids
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            if unwrap_model(model)._get_name() in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                loss = self.label_smoother(outputs, labels, shift_labels=True)
+            else:
+                loss = self.label_smoother(outputs, labels)
+        else:
+            if isinstance(outputs, dict) and "loss" not in outputs:
+                raise ValueError(
+                    "The model did not return a loss from the inputs, only the following keys: "
+                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
+                )
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
         return (loss, outputs) if return_outputs else loss
 
@@ -188,9 +214,10 @@ if __name__ == "__main__":
     discriminator_utils, direct_comp_utils = None, None
     if custom_args.use_discriminator:
         print('Loading discriminator...')
-        discriminator = SpeedRegressor('facebook/bart-base' if custom_args.discriminator_name == 'bart' else 'roberta-base')
+        # discriminator = SpeedRegressor('facebook/bart-base' if custom_args.discriminator_name == 'bart' else 'roberta-base')
+        discriminator = BartForSequenceClassification() if custom_args.discriminator_name == 'bart' else RobertaForSequenceClassification()
         discriminator.load_state_dict(torch.load(custom_args.discriminator_path))
-        discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", add_prefix_space=True)
+        discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", add_prefix_space=True, use_fast=True)
         if USE_CUDA:
             discriminator = discriminator.to(device)
 
@@ -256,7 +283,7 @@ if __name__ == "__main__":
 
     print(dschf)
 
-    training_args = TrainingArguments(
+    training_args = Seq2SeqTrainingArguments(
         output_dir=checkpoint_path,
         per_device_train_batch_size=(custom_args.batch_size / torch.cuda.device_count()),
         # save_steps=max(custom_args.total_steps // 5, min(custom_args.total_steps, 10000)),
@@ -284,8 +311,8 @@ if __name__ == "__main__":
 
     # print(training_args)
 
-    tokenizer = AutoTokenizer.from_pretrained(custom_args.generator)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(custom_args.generator, use_fast=True)
+    # tokenizer.pad_token = tokenizer.eos_token
 
     print('Loading data...')
     train_dataloader, eval_dataloader, max_r, tokenizer = get_data(
@@ -303,7 +330,7 @@ if __name__ == "__main__":
     print('Loading generative model...')
     config = AutoConfig.from_pretrained(
         custom_args.generator, output_hidden_states=True, output_attentions=True)
-    config.pad_token_id = config.eos_token_id
+    # config.pad_token_id = config.eos_token_id
     if 'bart-large' in custom_args.generator:
         config.forced_bos_token_id = 0
 
@@ -391,10 +418,18 @@ if __name__ == "__main__":
     # decoder = torch.nn.parallel.DistributedDataParallel(decoder, device_ids=[custom_args.local_rank']], output_device=custom_args['local_rank)
     # discriminator = torch.nn.parallel.DistributedDataParallel(discriminator, device_ids=[custom_args.local_rank']], output_device=custom_args['local_rank)
 
+    data_collator = DataCollatorForSeq2Seq(
+        tokenizer,
+        model=decoder,
+        label_pad_token_id=-100,
+        pad_to_multiple_of=None,
+    )
+
     trainer = CustomTrainer(
         args=training_args,
         model=decoder,
         tokenizer=tokenizer,
+        data_collator=data_collator,
         # optimizers=(optimizer, lr_scheduler), # doesn't work with deepspeed
         train_dataloader=train_dataloader,
         eval_dataloader=eval_dataloader,

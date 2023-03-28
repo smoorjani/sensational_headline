@@ -159,7 +159,7 @@ class DeltaDataset(data.Dataset):
         self.ys_seq = ys_seq
         self.s_seq = s_seq
 
-        self.tokenizer = tokenizer if tokenizer else AutoTokenizer.from_pretrained("facebook/bart-base")
+        self.tokenizer = tokenizer if tokenizer else AutoTokenizer.from_pretrained("facebook/bart-base", use_fast=True)
         self.switch = switch
         self.evaluation = evaluation
 

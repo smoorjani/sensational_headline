@@ -36,6 +36,9 @@ def get_discriminator_reward(
     
 
     generated_values = discriminator(generated_batch)
+    if type(generated_values) != torch.Tensor:
+        generated_values = generated_values.logits.squeeze(1)
+
     input_speeds = input_speeds if precomputed else discriminator(input_batch)
 
     rewards = (generated_values - input_speeds) - target_deltas

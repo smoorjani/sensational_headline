@@ -170,6 +170,8 @@ if __name__ == '__main__':
     for model_name in glob.glob(MODEL_BASE_DIR + '/*'):
         # if '50000' in model_name:
         #     continue
+        if '_0.0_' not in model_name:
+            continue
 
         predictions = None
         prediction_path = os.path.join(
