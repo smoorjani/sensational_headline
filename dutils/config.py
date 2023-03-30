@@ -26,6 +26,8 @@ def get_args():
     parser.add_argument('--fasttext_model', type=str, default="/control_tuning/fasttext_model/wiki-news-300d-1M.vec", help="fasttext model") 
     parser.add_argument('--use_discriminator', action='store_true', help='use trained discriminator instead of fasttext calculations')
     parser.add_argument('--control_method', type=str, default="tag", help='whether to use special tag or control embedding')
+    parser.add_argument('--use_strict_avg', action='store_true', help='use strict average calculations (enforce delta for each window)')
+
 
     parser.add_argument('--training_data', type=str, default="/control_tuning/yelpdata/pretraining_data/train.txt", help="training data") 
     parser.add_argument('--eval_data', type=str, default="/control_tuning/yelpdata/pretraining_data/val.txt", help="eval data") 

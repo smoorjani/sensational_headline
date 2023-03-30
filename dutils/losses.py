@@ -65,6 +65,7 @@ def get_tuning_loss(args, batch, decoder, tokenizer, discriminator_utils, direct
             batch['deltas'],
             precomputed=True,
             input_speeds=batch['input_speeds'],
+            strict_avg=args.use_strict_avg,
             device=device
         )
         

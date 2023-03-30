@@ -31,6 +31,7 @@ from dutils.data_utils import prepare_data_seq, collate_fn, get_data
 import ssl
 import json
 import nltk
+from collections import OrderedDict
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from word_embedding_measures.utils.embeddings import load_fasttext
@@ -215,8 +216,10 @@ if __name__ == "__main__":
     if custom_args.use_discriminator:
         print('Loading discriminator...')
         # discriminator = SpeedRegressor('facebook/bart-base' if custom_args.discriminator_name == 'bart' else 'roberta-base')
-        discriminator = BartForSequenceClassification() if custom_args.discriminator_name == 'bart' else RobertaForSequenceClassification()
+        config = AutoConfig.from_pretrained("facebook/bart-base" if custom_args.discriminator_name == 'bart' else 'roberta-base', num_labels=1)
+        discriminator = BartForSequenceClassification(config) if custom_args.discriminator_name == 'bart' else RobertaForSequenceClassification(config)
         discriminator.load_state_dict(torch.load(custom_args.discriminator_path))
+        
         discriminator_tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", add_prefix_space=True, use_fast=True)
         if USE_CUDA:
             discriminator = discriminator.to(device)
@@ -258,6 +261,9 @@ if __name__ == "__main__":
             f"_{custom_args.gamma}_{custom_args.total_steps}_{custom_args.batch_size}_{custom_args.optimizer}"
             f"_{custom_args.lr}_{custom_args.weight_decay}_{custom_args.max_grad_norm}_{custom_args.eps}"
         )
+
+    if custom_args.use_strict_avg and 'strict_avg' not in custom_args.notes:
+        custom_args.notes += '_strict_avg' if len(custom_args.notes) else 'strict_avg'
 
     ckpt_name += f'_{custom_args.notes}' if custom_args.notes else ''
 

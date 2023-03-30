@@ -7,7 +7,7 @@ import pandas as pd
 
 from bert_score import score
 from datasets import load_metric
-from transformers import AutoModelWithLMHead, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BartForConditionalGeneration
 from transformers.models.bart_speed.modeling_sbart import SBartForConditionalGeneration
 
 from dutils.data_utils import read_langs
@@ -35,14 +35,14 @@ def get_args():
     parser.add_argument('--beams', type=int, help='Num beams for decoding', default=1)
     parser.add_argument('--repetition_penalty', type=float, help='Penalty for repetitive tokens', default=1.3)
     parser.add_argument('--top_k', type=int, help='Top-k for decoding', default=0)
-    parser.add_argument('--top_p', type=int, help='Top-p for decoding', default=0)
+    parser.add_argument('--top_p', type=float, help='Top-p for decoding', default=0)
 
     parser.add_argument('--train_file', type=str, help='File with train sentences/inps to get switch', default='/train.txt')
     parser.add_argument('--test_file', type=str, help='File with test sentences/inps', default='/eval.txt')
     parser.add_argument('--limit', type=int, help='Num of samples to use', default=1000)
     parser.add_argument('--logging_file', type=str, help='File to log to', default='./evaluation_log')
 
-    parser.add_argument('--arch', type=str, help='Model architecture', default='Zohar/distilgpt2-finetuned-restaurant-reviews-clean')
+    parser.add_argument('--arch', type=str, help='Model architecture', default='facebook/bart-base')
     parser.add_argument('--model_name', type=str, help='Model to evaluate', default="")
     args = parser.parse_args()
     return args
@@ -89,7 +89,9 @@ def generate_predictions(args, inps, deltas, model, tokenizer, switch, logger):
                 pad_token_id=tokenizer.eos_token_id,
                 temperature=args.temperature,
                 repetition_penalty=args.repetition_penalty,
-                control=torch.tensor(delta) # handled by model_specific_kwargs
+                top_p=args.top_p if 0. < args.top_p < 1.  else 1.0,
+                top_k=args.top_k if args.top_k > 0 else 50,
+                control=torch.tensor(delta), # handled by model_specific_kwargs
             )
         else:
             output = model.generate(
@@ -99,7 +101,9 @@ def generate_predictions(args, inps, deltas, model, tokenizer, switch, logger):
                 early_stopping=True,
                 pad_token_id=tokenizer.eos_token_id,
                 temperature=args.temperature,
-                repetition_penalty=args.repetition_penalty
+                repetition_penalty=args.repetition_penalty,
+                top_p=args.top_p if 0. < args.top_p < 1.  else 1.0,
+                top_k=args.top_k if args.top_k > 0 else 50,
             )
 
         output = tokenizer.decode(output[0], skip_special_tokens=True)
@@ -152,26 +156,26 @@ if __name__ == '__main__':
     logger = logging.getLogger('evaluation_logger')
 
     inps, targets, deltas = read_test_set(args)
-    tokenizer = AutoTokenizer.from_pretrained(args.arch)
+    
 
     thd = 0.0
     d_train, _ = read_langs(DATA_BASE_DIR + args.train_file, thd)
     switch = get_default_switch([item['s'] for item in d_train])
 
     special_tokens = list(switch.values())
-    log_and_print('Adding special tokens to tokenizer', logger)
-    tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
 
-    if len(args.model_name):
-        MODELS_TO_USE = MODELS_TO_USE + [args.model_name]
-        # MODELS_TO_USE = [args.model_name]
-
+    MODELS_TO_USE = args.model_name if len(args.model_name) else glob.glob(MODEL_BASE_DIR + '/*')
     model_scores = []
-    for model_name in glob.glob(MODEL_BASE_DIR + '/*'):
+    for model_name in MODELS_TO_USE:
         # if '50000' in model_name:
         #     continue
-        if '_0.0_' not in model_name:
-            continue
+        # if '_0.0_' not in model_name:
+        #     continue
+
+        log_and_print('Adding special tokens to tokenizer', logger)
+        tokenizer = AutoTokenizer.from_pretrained(args.arch, padding_side = 'left')
+        tokenizer.padding_side = 'left'
+        tokenizer.add_special_tokens({'additional_special_tokens': special_tokens})
 
         predictions = None
         prediction_path = os.path.join(
@@ -195,7 +199,7 @@ if __name__ == '__main__':
                 if 'sbart' in model_name:
                     model = SBartForConditionalGeneration.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
                 else:
-                    model = AutoModelWithLMHead.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
+                    model = BartForConditionalGeneration.from_pretrained(os.path.join(MODEL_BASE_DIR, model_name)).to(args.device)
             except OSError:
                 log_and_print(f"Can't load this model right now.", logger)
                 continue

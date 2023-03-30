@@ -22,4 +22,4 @@ conda activate sen2
 cd /u/smoorjani/control_tuning/sensational_headline
 export PYTHONPATH="${PYTHONPATH}:/u/smoorjani/sensational_headline"
 
-python scripts/run_evaluation.py
+python scripts/run_evaluation.py --top_p 0.8

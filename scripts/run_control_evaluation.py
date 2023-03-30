@@ -138,5 +138,8 @@ if __name__ == '__main__':
     print(f'Distance from bounds: {distance_from_bounds / len(deltas)}')
     print(f'Distance from center: {distance_from_center / len(deltas)}')
 
+    with open('control_scores.csv', 'a') as f:
+        f.write(f'{args.pred_file},{mae},{distance_from_bounds / len(deltas)},{distance_from_center / len(deltas)}\n')
+
 
 

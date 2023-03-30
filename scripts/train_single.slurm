@@ -24,4 +24,6 @@ export PYTHONPATH="${PYTHONPATH}:/u/smoorjani/control_tuning/speed_control:/u/sm
 
 export MASTER_ADDR=$[ $RANDOM % 30000 + 29500 ]
 
-deepspeed --num_gpus=4 --master_port $MASTER_ADDR sensation_generation_trainer.py --total_steps 20000 --lr 5e-5 --gamma 0 --batch_size 32 --use_discriminator --control_method tag --discriminator_path /projects/bblr/smoorjani/control_tuning/speed_control/bart/checkpoint_6_0_False_5e-05_2_0.8_3_0.001  #--notes "decoder_input_ids"
+# deepspeed --num_gpus=4 --master_port $MASTER_ADDR sensation_generation_trainer.py --total_steps 20000 --lr 5e-5 --gamma 0 --batch_size 32 --use_discriminator --control_method tag --discriminator_path /projects/bblr/smoorjani/control_tuning/speed_control/bart/checkpoint_6_0_False_5e-05_2_0.8_3_0.001  #--notes "decoder_input_ids"
+
+deepspeed --num_gpus=4 --master_port $MASTER_ADDR sensation_generation_trainer.py --total_steps 20000 --lr 5e-5 --gamma 0.1 --batch_size 32 --use_discriminator --control_method tag --discriminator_path /projects/bblr/smoorjani/control_tuning/speed_control/roberta/checkpoint_6_0_False_5e-05_1_0.8_3_0.001_no_pad  --notes "strict_avg"
